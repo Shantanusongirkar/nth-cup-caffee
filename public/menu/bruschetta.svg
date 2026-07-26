@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#CD853F;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#af6721;stop-opacity:1" />
+    </linearGradient>
+    <filter id="shadow">
+      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-opacity="0.15"/>
+    </filter>
+  </defs>
+  <rect width="400" height="400" rx="24" fill="url(#bg)"/>
+  <circle cx="200" cy="170" r="80" fill="rgba(255,255,255,0.15)" filter="url(#shadow)"/>
+  <text x="200" y="195" font-size="80" text-anchor="middle" dominant-baseline="middle">🍅</text>
+  <text x="200" y="320" font-family="system-ui, sans-serif" font-size="22" font-weight="600" fill="rgba(255,255,255,0.9)" text-anchor="middle">Bruschetta</text>
+</svg>
