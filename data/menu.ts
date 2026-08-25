@@ -1,6 +1,6 @@
 import { MenuItem } from '@/types';
 
-const menuItems: MenuItem[] = [
+export const menuItems: MenuItem[] = [
   // ==================== COFFEE ====================
   {
     id: 'coffee-001',

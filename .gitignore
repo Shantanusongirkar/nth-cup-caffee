@@ -17,6 +17,9 @@
 /.next/
 /out/
 
+# Prisma Client is generated from prisma/schema.prisma.
+/generated/
+
 # production
 /build
 

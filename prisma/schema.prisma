@@ -1,0 +1,137 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  OWNER
+  STAFF
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+}
+
+model Cafe {
+  id        String     @id @default(uuid())
+  name      String
+  slug      String     @unique
+  phone     String?
+  address   String?
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  users     User[]
+  customers Customer[]
+  products  Product[]
+  orders    Order[]
+  feedback  Feedback[]
+}
+
+model User {
+  id        String   @id @default(uuid())
+  cafeId    String
+  name      String
+  email     String   @unique
+  role      UserRole @default(OWNER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  cafe      Cafe     @relation(fields: [cafeId], references: [id])
+
+  @@index([cafeId])
+}
+
+model Customer {
+  id        String   @id @default(uuid())
+  cafeId    String
+  name      String
+  phone     String?
+  email     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  cafe      Cafe     @relation(fields: [cafeId], references: [id])
+  orders    Order[]
+  feedback  Feedback[]
+
+  @@unique([cafeId, phone])
+  @@index([cafeId, createdAt])
+}
+
+model Product {
+  id           String      @id @default(uuid())
+  cafeId       String
+  sku          String
+  name         String
+  description  String
+  priceInPaise Int
+  imageUrl     String?
+  category     String
+  isAvailable  Boolean     @default(true)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  cafe         Cafe        @relation(fields: [cafeId], references: [id])
+  orderItems   OrderItem[]
+
+  @@unique([cafeId, sku])
+  @@index([cafeId, isAvailable])
+}
+
+model Order {
+  id              String      @id @default(uuid())
+  cafeId          String
+  customerId      String
+  status          OrderStatus @default(PENDING)
+  tableNumber     String?
+  notes           String?
+  subtotalInPaise Int
+  taxInPaise      Int         @default(0)
+  totalInPaise    Int
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  cafe            Cafe        @relation(fields: [cafeId], references: [id])
+  customer        Customer    @relation(fields: [customerId], references: [id])
+  items           OrderItem[]
+  feedback        Feedback[]
+
+  @@index([cafeId, createdAt])
+  @@index([customerId, createdAt])
+}
+
+model OrderItem {
+  id               String   @id @default(uuid())
+  orderId          String
+  productId        String
+  productName      String
+  unitPriceInPaise Int
+  quantity         Int
+  createdAt        DateTime @default(now())
+  order            Order    @relation(fields: [orderId], references: [id])
+  product          Product  @relation(fields: [productId], references: [id])
+
+  @@index([orderId])
+  @@index([productId])
+}
+
+model Feedback {
+  id         String    @id @default(uuid())
+  cafeId     String
+  customerId String?
+  orderId    String?
+  rating     Int?
+  comment    String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  cafe       Cafe      @relation(fields: [cafeId], references: [id])
+  customer   Customer? @relation(fields: [customerId], references: [id])
+  order      Order?    @relation(fields: [orderId], references: [id])
+
+  @@index([cafeId, createdAt])
+  @@index([customerId])
+  @@index([orderId])
+}
