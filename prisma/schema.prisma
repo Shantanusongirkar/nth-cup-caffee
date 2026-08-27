@@ -7,18 +7,6 @@ datasource db {
   provider = "postgresql"
 }
 
-enum UserRole {
-  OWNER
-  STAFF
-}
-
-enum OrderStatus {
-  PENDING
-  CONFIRMED
-  COMPLETED
-  CANCELLED
-}
-
 model Cafe {
   id        String     @id @default(uuid())
   name      String
@@ -27,11 +15,11 @@ model Cafe {
   address   String?
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
-  users     User[]
   customers Customer[]
-  products  Product[]
-  orders    Order[]
   feedback  Feedback[]
+  orders    Order[]
+  products  Product[]
+  users     User[]
 }
 
 model User {
@@ -48,16 +36,16 @@ model User {
 }
 
 model Customer {
-  id        String   @id @default(uuid())
+  id        String     @id @default(uuid())
   cafeId    String
   name      String
   phone     String?
   email     String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  cafe      Cafe     @relation(fields: [cafeId], references: [id])
-  orders    Order[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  cafe      Cafe       @relation(fields: [cafeId], references: [id])
   feedback  Feedback[]
+  orders    Order[]
 
   @@unique([cafeId, phone])
   @@index([cafeId, createdAt])
@@ -75,8 +63,8 @@ model Product {
   isAvailable  Boolean     @default(true)
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
-  cafe         Cafe        @relation(fields: [cafeId], references: [id])
   orderItems   OrderItem[]
+  cafe         Cafe        @relation(fields: [cafeId], references: [id])
 
   @@unique([cafeId, sku])
   @@index([cafeId, isAvailable])
@@ -94,10 +82,10 @@ model Order {
   totalInPaise    Int
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
+  feedback        Feedback[]
   cafe            Cafe        @relation(fields: [cafeId], references: [id])
   customer        Customer    @relation(fields: [customerId], references: [id])
   items           OrderItem[]
-  feedback        Feedback[]
 
   @@index([cafeId, createdAt])
   @@index([customerId, createdAt])
@@ -134,4 +122,16 @@ model Feedback {
   @@index([cafeId, createdAt])
   @@index([customerId])
   @@index([orderId])
+}
+
+enum UserRole {
+  OWNER
+  STAFF
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  COMPLETED
+  CANCELLED
 }

@@ -27,22 +27,54 @@ export function CheckoutForm() {
   const total = getTotal();
   const isValid = customerName.trim().length > 0 && items.length > 0;
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!isValid) return;
+  const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+  if (!isValid) return;
 
-    setIsSubmitting(true);
+  setIsSubmitting(true);
 
-    const orderDetails: OrderDetails = {
-      customerName: customerName.trim(),
-      tableNumber: tableNumber.trim() || undefined,
-      phoneNumber: phoneNumber.trim() || undefined,
-      specialInstructions: specialInstructions.trim() || undefined,
-    };
+  const orderDetails: OrderDetails = {
+    customerName: customerName.trim(),
+    tableNumber: tableNumber.trim() || undefined,
+    phoneNumber: phoneNumber.trim() || undefined,
+    specialInstructions: specialInstructions.trim() || undefined,
+  };
 
-    const { url, message, isTruncated } = buildWhatsAppUrl(items, orderDetails, total);
+  try {
+    // Create the order in our backend first.
+    const response = await fetch('/api/orders', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        cafeSlug: 'nth-cup-demo',
+        customer: {
+          name: orderDetails.customerName,
+          phone: orderDetails.phoneNumber,
+        },
+        items: items.map((cartItem) => ({
+          productSku: cartItem.item.id,
+          quantity: cartItem.quantity,
+        })),
+        tableNumber: orderDetails.tableNumber,
+        notes: orderDetails.specialInstructions,
+      }),
+    });
 
-    // Save order data to sessionStorage for the success page
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.message || 'Failed to create order.');
+    }
+
+    // Backend successfully created the order.
+    const { url, message, isTruncated } = buildWhatsAppUrl(
+      items,
+      orderDetails,
+      total
+    );
+
     if (typeof window !== 'undefined') {
       sessionStorage.setItem(
         'latestOrder',
@@ -53,19 +85,32 @@ export function CheckoutForm() {
           fullMessage: message,
           isTruncated,
           whatsappUrl: url,
+          orderId: result.order.id,
         })
       );
     }
 
-    toast.success('Order generated! Opening WhatsApp...', { duration: 2500 });
+    toast.success('Order saved! Opening WhatsApp...', {
+      duration: 2500,
+    });
 
-    // Open WhatsApp in new tab or direct location
     setTimeout(() => {
       window.open(url, '_blank');
-      // Redirect local page to success screen
+      clearCart();
       router.push('/success');
     }, 500);
-  };
+  } catch (error) {
+    console.error('Order creation failed:', error);
+
+    toast.error(
+      error instanceof Error
+        ? error.message
+        : 'Unable to place your order. Please try again.'
+    );
+
+    setIsSubmitting(false);
+  }
+};
 
   const presetNotes = ['Extra Sugar', 'No Ice', 'Less Milk', 'Extra Hot', 'Strong Coffee'];
 
