@@ -15,8 +15,17 @@ const prisma = new PrismaClient({ adapter });
 async function main() {
   const cafe = await prisma.cafe.upsert({
     where: { slug: "nth-cup-demo" },
-    update: { name: "Nth Cup Caffee" },
-    create: { name: "Nth Cup Caffee", slug: "nth-cup-demo" },
+    update: {
+      name: "Nth Cup Caffee",
+      phone: "+91 98765 43210",
+      address: "123 Artisanal Brews Street, Bangalore",
+    },
+    create: {
+      name: "Nth Cup Caffee",
+      slug: "nth-cup-demo",
+      phone: "+91 98765 43210",
+      address: "123 Artisanal Brews Street, Bangalore",
+    },
   });
 
   await prisma.user.upsert({

@@ -16,6 +16,7 @@ interface SavedOrder {
   fullMessage: string;
   isTruncated: boolean;
   whatsappUrl: string;
+  orderId?: string;
 }
 
 export default function SuccessPage() {
@@ -80,11 +81,18 @@ export default function SuccessPage() {
               <h3 className="font-heading font-bold text-base text-foreground">
                 Order for {order.orderDetails.customerName}
               </h3>
-              {order.orderDetails.tableNumber && (
-                <p className="text-xs text-primary font-semibold">
-                  Table #{order.orderDetails.tableNumber}
-                </p>
-              )}
+              <div className="flex items-center gap-2">
+                {order.orderDetails.tableNumber && (
+                  <p className="text-xs text-primary font-semibold">
+                    Table #{order.orderDetails.tableNumber}
+                  </p>
+                )}
+                {order.orderId && (
+                  <span className="text-[11px] text-muted-foreground font-mono">
+                    #{order.orderId.slice(0, 8)}
+                  </span>
+                )}
+              </div>
             </div>
             <span className="font-extrabold text-lg text-primary">₹{order.total}</span>
           </div>

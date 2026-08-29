@@ -90,15 +90,18 @@ export function CheckoutForm() {
       );
     }
 
-    toast.success('Order saved! Opening WhatsApp...', {
+    toast.success('Order placed successfully! Redirecting to confirmation...', {
       duration: 2500,
     });
 
-    setTimeout(() => {
+    // Attempt to open WhatsApp in a new tab if supported, otherwise success page provides instant button
+    try {
       window.open(url, '_blank');
-      clearCart();
-      router.push('/success');
-    }, 500);
+    } catch {
+      // Ignored if blocked by browser popup blocker
+    }
+
+    router.push('/success');
   } catch (error) {
     console.error('Order creation failed:', error);
 

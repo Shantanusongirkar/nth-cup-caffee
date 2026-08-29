@@ -4,7 +4,8 @@ import * as React from 'react';
 import { MessageCircle } from 'lucide-react';
 
 export function WhatsAppFab() {
-  const phone = process.env.NEXT_PUBLIC_CAFE_WHATSAPP_NUMBER || '';
+  const rawPhone = process.env.NEXT_PUBLIC_CAFE_WHATSAPP_NUMBER || '919876543210';
+  const phone = rawPhone.replace(/\D/g, '');
 
   if (!phone) return null;
 

@@ -95,7 +95,8 @@ export function buildWhatsAppUrl(
   total: number
 ): { url: string; message: string; isTruncated: boolean } {
   const fullMessage = generateWhatsAppMessage(items, order, total);
-  const phone = process.env.NEXT_PUBLIC_CAFE_WHATSAPP_NUMBER ?? '';
+  const rawPhone = process.env.NEXT_PUBLIC_CAFE_WHATSAPP_NUMBER || '919876543210';
+  const phone = rawPhone.replace(/\D/g, '');
 
   const fullEncoded = encodeURIComponent(fullMessage);
   const fullUrl = `https://wa.me/${phone}?text=${fullEncoded}`;
