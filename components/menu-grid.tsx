@@ -44,7 +44,7 @@ export function MenuGrid({ items, isLoading, onClearFilters }: MenuGridProps) {
         <div className="space-y-1.5 max-w-sm">
           <h3 className="font-heading font-bold text-lg text-foreground">No menu items found</h3>
           <p className="text-xs text-muted-foreground">
-            We couldn't find anything matching your search or category filter. Try clearing filters.
+            We couldn&apos;t find anything matching your search or category filter. Try clearing filters.
           </p>
         </div>
         {onClearFilters && (

@@ -191,20 +191,31 @@ export const menuItems: MenuItem[] = [
 ];
 
 /**
- * Fetches menu items. Currently returns hardcoded data.
- *
- * This is the API seam — to connect a real backend later,
- * replace the implementation with a fetch() call:
- *
- * ```typescript
- * export async function getMenuItems(): Promise<MenuItem[]> {
- *   const res = await fetch('/api/menu');
- *   return res.json();
- * }
- * ```
+ * Fetches menu items from Neon PostgreSQL via /api/menu with fallback to local seed data.
  */
-export async function getMenuItems(): Promise<MenuItem[]> {
-  // Simulate network delay for realistic loading states
-  await new Promise((resolve) => setTimeout(resolve, 300));
-  return menuItems;
+export async function getMenuItems(cafeSlug: string = 'nth-cup-demo'): Promise<MenuItem[]> {
+  try {
+    const res = await fetch(`/api/menu?cafeSlug=${encodeURIComponent(cafeSlug)}`, {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    });
+
+    if (!res.ok) {
+      console.warn(`Menu API returned ${res.status}, falling back to static menu data.`);
+      return menuItems;
+    }
+
+    const data = await res.json();
+    if (Array.isArray(data.items) && data.items.length > 0) {
+      return data.items;
+    }
+    if (Array.isArray(data) && data.length > 0) {
+      return data;
+    }
+
+    return menuItems;
+  } catch (error) {
+    console.warn('Network error fetching menu, falling back to static data:', error);
+    return menuItems;
+  }
 }

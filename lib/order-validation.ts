@@ -1,3 +1,5 @@
+import { OrderStatus } from "@/types";
+
 export interface CreateOrderInput {
   cafeSlug: string;
   customer: { name: string; phone?: string; email?: string };
@@ -113,4 +115,21 @@ export function validateCreateOrderInput(value: unknown): ValidationResult {
   }
 
   return { success: true, data: { cafeSlug, customer, items, tableNumber, notes } };
+}
+
+const VALID_STATUSES: readonly OrderStatus[] = ["PENDING", "CONFIRMED", "COMPLETED", "CANCELLED"] as const;
+
+export function validateUpdateOrderStatusInput(value: unknown): { success: true; data: { status: OrderStatus } } | { success: false; errors: string[] } {
+  if (!isRecord(value)) {
+    return { success: false, errors: ["Request body must be a JSON object."] };
+  }
+
+  if (typeof value.status !== "string" || !VALID_STATUSES.includes(value.status as OrderStatus)) {
+    return {
+      success: false,
+      errors: [`status must be one of: ${VALID_STATUSES.join(", ")}`],
+    };
+  }
+
+  return { success: true, data: { status: value.status as OrderStatus } };
 }

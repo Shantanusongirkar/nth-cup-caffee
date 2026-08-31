@@ -2,7 +2,7 @@
 
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import { CartItem, CartStore, MenuItem } from '@/types';
+import { CartStore, MenuItem } from '@/types';
 
 const TAX_RATE = 0.05; // 5% flat tax — placeholder to be replaced later
 

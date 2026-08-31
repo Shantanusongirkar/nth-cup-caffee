@@ -4,7 +4,7 @@ import * as React from 'react';
 import Image from 'next/image';
 import { MenuItem } from '@/types';
 import { useCartStore } from '@/store/cart-store';
-import { Plus, Check } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { QuantitySelector } from '@/components/quantity-selector';

@@ -3,6 +3,7 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { useCartStore } from '@/store/cart-store';
+import { useMounted } from '@/hooks/use-mounted';
 import { CartItem } from '@/components/cart-item';
 import { OrderSummary } from '@/components/order-summary';
 import { Button } from '@/components/ui/button';
@@ -11,11 +12,7 @@ import { ShoppingBag, ArrowLeft, ArrowRight, Trash2, Coffee } from 'lucide-react
 export default function CartPage() {
   const items = useCartStore((state) => state.items);
   const clearCart = useCartStore((state) => state.clearCart);
-  const [mounted, setMounted] = React.useState(false);
-
-  React.useEffect(() => {
-    setMounted(true);
-  }, []);
+  const mounted = useMounted();
 
   if (!mounted) {
     return (
@@ -32,7 +29,7 @@ export default function CartPage() {
         <div className="space-y-2 max-w-sm">
           <h2 className="font-heading font-bold text-2xl text-foreground">Your Cart is Empty</h2>
           <p className="text-sm text-muted-foreground">
-            Looks like you haven't added any coffee or snacks yet. Browse our menu and pick something delicious!
+            Looks like you haven&apos;t added any coffee or snacks yet. Browse our menu and pick something delicious!
           </p>
         </div>
         <Link href="/">
