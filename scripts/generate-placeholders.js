@@ -1,6 +1,10 @@
 // Script to generate placeholder SVG images for menu items that don't have AI-generated photos
-const fs = require('fs');
-const path = require('path');
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const items = [
   { file: 'caramel-macchiato.png', emoji: '☕', bg: '#D4A574', label: 'Caramel Macchiato' },
@@ -21,6 +25,14 @@ const items = [
 ];
 
 const menuDir = path.join(__dirname, '..', 'public', 'menu');
+
+function adjustColor(hex, amount) {
+  const num = parseInt(hex.replace('#', ''), 16);
+  const r = Math.max(0, Math.min(255, ((num >> 16) & 0xff) + amount));
+  const g = Math.max(0, Math.min(255, ((num >> 8) & 0xff) + amount));
+  const b = Math.max(0, Math.min(255, (num & 0xff) + amount));
+  return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`;
+}
 
 for (const item of items) {
   // Skip if file already exists (AI-generated)
@@ -48,12 +60,4 @@ for (const item of items) {
   // Save as SVG (next/image handles SVGs fine)
   fs.writeFileSync(filePath, svg);
   console.log(`Created: ${filePath}`);
-}
-
-function adjustColor(hex, amount) {
-  const num = parseInt(hex.replace('#', ''), 16);
-  const r = Math.max(0, Math.min(255, ((num >> 16) & 0xff) + amount));
-  const g = Math.max(0, Math.min(255, ((num >> 8) & 0xff) + amount));
-  const b = Math.max(0, Math.min(255, (num & 0xff) + amount));
-  return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`;
 }

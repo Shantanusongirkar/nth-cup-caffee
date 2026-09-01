@@ -52,7 +52,7 @@ export function CartDrawer({ open, onOpenChange }: CartDrawerProps) {
             <div className="space-y-1">
               <h4 className="font-bold text-base text-foreground">Your cart is empty</h4>
               <p className="text-xs text-muted-foreground max-w-xs">
-                Looks like you haven't added any coffee or treats yet.
+                Looks like you haven&apos;t added any coffee or treats yet.
               </p>
             </div>
             <Button

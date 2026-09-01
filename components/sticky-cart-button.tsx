@@ -5,17 +5,12 @@ import Link from 'next/link';
 import { useCartStore } from '@/store/cart-store';
 import { ShoppingBag, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useMounted } from '@/hooks/use-mounted';
 
 export function StickyCartButton() {
-  const items = useCartStore((state) => state.items);
   const getTotal = useCartStore((state) => state.getTotal);
   const getItemCount = useCartStore((state) => state.getItemCount);
-
-  const [mounted, setMounted] = React.useState(false);
-
-  React.useEffect(() => {
-    setMounted(true);
-  }, []);
+  const mounted = useMounted();
 
   if (!mounted) return null;
 

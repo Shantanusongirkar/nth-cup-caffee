@@ -2,21 +2,16 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useCartStore } from '@/store/cart-store';
+import { useMounted } from '@/hooks/use-mounted';
 import { CheckoutForm } from '@/components/checkout-form';
 import { OrderSummary } from '@/components/order-summary';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft, ShoppingBag } from 'lucide-react';
 
 export default function CheckoutPage() {
-  const router = useRouter();
   const items = useCartStore((state) => state.items);
-  const [mounted, setMounted] = React.useState(false);
-
-  React.useEffect(() => {
-    setMounted(true);
-  }, []);
+  const mounted = useMounted();
 
   if (!mounted) {
     return <div className="py-12 text-center text-muted-foreground">Loading checkout...</div>;

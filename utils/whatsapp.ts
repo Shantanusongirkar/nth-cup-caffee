@@ -1,101 +1,94 @@
-import { CartItem, OrderDetails } from '@/types';
+import { ServerOrder } from "@/types";
 
 const WHATSAPP_URL_CHAR_LIMIT = 1800;
 
-function formatCurrency(amount: number): string {
-  return `₹${amount.toLocaleString('en-IN')}`;
+export function formatPaiseToRupees(paise: number): string {
+  const rupees = Math.round(paise / 100);
+  return `₹${rupees.toLocaleString("en-IN")}`;
 }
 
 /**
- * Generates a formatted WhatsApp order message.
+ * Generates a structured WhatsApp order message from a verified server order.
  */
-export function generateWhatsAppMessage(
-  items: CartItem[],
-  order: OrderDetails,
-  total: number
-): string {
+export function generateWhatsAppMessageFromOrder(order: ServerOrder): string {
   const lines: string[] = [];
 
-  lines.push('Hello! ☕');
-  lines.push('');
-  lines.push('*New Order*');
-  lines.push('');
+  lines.push("☕ *Nth Cup Caffee — Order Confirmation*");
+  lines.push("");
+  lines.push(`*Order Reference:* #${order.orderReference || order.id.slice(0, 8).toUpperCase()}`);
+  lines.push(`*Status:* ${order.status}`);
+  lines.push("");
 
-  lines.push(`*Customer:*`);
-  lines.push(order.customerName);
-  lines.push('');
-
+  lines.push("*Customer Details:*");
+  lines.push(`• Name: ${order.customer.name}`);
   if (order.tableNumber) {
-    lines.push(`*Table:*`);
-    lines.push(order.tableNumber);
-    lines.push('');
+    lines.push(`• Table: ${order.tableNumber}`);
+  }
+  if (order.customer.phone) {
+    lines.push(`• Phone: ${order.customer.phone}`);
+  }
+  lines.push("");
+
+  lines.push("*Order Items:*");
+  for (const item of order.items) {
+    const itemTotalPaise = item.unitPriceInPaise * item.quantity;
+    lines.push(
+      `• ${item.quantity}× ${item.productName} (${formatPaiseToRupees(item.unitPriceInPaise)}) — ${formatPaiseToRupees(itemTotalPaise)}`
+    );
+  }
+  lines.push("");
+
+  lines.push(`*Subtotal:* ${formatPaiseToRupees(order.subtotalInPaise)}`);
+  if (order.taxInPaise > 0) {
+    lines.push(`*Tax (5%):* ${formatPaiseToRupees(order.taxInPaise)}`);
+  }
+  lines.push(`*Total Amount: ${formatPaiseToRupees(order.totalInPaise)}*`);
+  lines.push("");
+
+  if (order.notes) {
+    lines.push("*Special Instructions:*");
+    lines.push(`"${order.notes}"`);
+    lines.push("");
   }
 
-  if (order.phoneNumber) {
-    lines.push(`*Phone:*`);
-    lines.push(order.phoneNumber);
-    lines.push('');
-  }
+  lines.push("Thank you for ordering with Nth Cup Caffee! 🙏");
 
-  lines.push('*Items:*');
-  for (const cartItem of items) {
-    lines.push(`${cartItem.quantity} × ${cartItem.item.name} — ${formatCurrency(cartItem.item.price * cartItem.quantity)}`);
-  }
-  lines.push('');
-
-  lines.push(`*Total: ${formatCurrency(total)}*`);
-  lines.push('');
-
-  if (order.specialInstructions) {
-    lines.push('*Notes:*');
-    lines.push(order.specialInstructions);
-    lines.push('');
-  }
-
-  lines.push('Thank you! 🙏');
-
-  return lines.join('\n');
+  return lines.join("\n");
 }
 
 /**
- * Generates a truncated message when the full message exceeds URL limits.
+ * Generates a concise fallback message when full details exceed URL limit.
  */
-function generateTruncatedMessage(
-  items: CartItem[],
-  order: OrderDetails,
-  total: number
-): string {
-  const totalItems = items.reduce((sum, i) => sum + i.quantity, 0);
+function generateTruncatedOrderMessage(order: ServerOrder): string {
+  const totalItemCount = order.items.reduce((sum, item) => sum + item.quantity, 0);
   const lines: string[] = [];
 
-  lines.push('Hello! ☕');
-  lines.push('');
-  lines.push('*New Order*');
-  lines.push('');
-  lines.push(`*Customer:* ${order.customerName}`);
+  lines.push("☕ *Nth Cup Caffee — Order*");
+  lines.push("");
+  lines.push(`*Order Reference:* #${order.orderReference || order.id.slice(0, 8).toUpperCase()}`);
+  lines.push(`*Customer:* ${order.customer.name}`);
   if (order.tableNumber) lines.push(`*Table:* ${order.tableNumber}`);
-  if (order.phoneNumber) lines.push(`*Phone:* ${order.phoneNumber}`);
-  lines.push('');
-  lines.push(`*${totalItems} items — ${formatCurrency(total)}*`);
-  lines.push('(Full details shared separately)');
-  lines.push('');
-  lines.push('Thank you! 🙏');
+  if (order.customer.phone) lines.push(`*Phone:* ${order.customer.phone}`);
+  lines.push("");
+  lines.push(`*${totalItemCount} items — Total: ${formatPaiseToRupees(order.totalInPaise)}*`);
+  lines.push("(Full line-by-line breakdown sent via receipt)");
+  lines.push("");
+  lines.push("Thank you! 🙏");
 
-  return lines.join('\n');
+  return lines.join("\n");
 }
 
 /**
- * Builds the WhatsApp URL with the order message.
- * Returns { url, message, isTruncated } so the UI can offer
- * a "Copy full details" fallback when truncated.
+ * Builds the WhatsApp direct chat URL using the configured phone number and server order.
  */
-export function buildWhatsAppUrl(
-  items: CartItem[],
-  order: OrderDetails,
-  total: number
-): { url: string; message: string; isTruncated: boolean } {
-  const fullMessage = generateWhatsAppMessage(items, order, total);
-  const phone = process.env.NEXT_PUBLIC_CAFE_WHATSAPP_NUMBER ?? '';
+export function buildWhatsAppUrlFromOrder(order: ServerOrder): {
+  url: string;
+  message: string;
+  isTruncated: boolean;
+} {
+  const fullMessage = generateWhatsAppMessageFromOrder(order);
+  const rawPhone = process.env.NEXT_PUBLIC_CAFE_WHATSAPP_NUMBER || "919876543210";
+  const phone = rawPhone.replace(/\D/g, "");
 
   const fullEncoded = encodeURIComponent(fullMessage);
   const fullUrl = `https://wa.me/${phone}?text=${fullEncoded}`;
@@ -104,8 +97,7 @@ export function buildWhatsAppUrl(
     return { url: fullUrl, message: fullMessage, isTruncated: false };
   }
 
-  // Truncated fallback
-  const truncatedMessage = generateTruncatedMessage(items, order, total);
+  const truncatedMessage = generateTruncatedOrderMessage(order);
   const truncatedEncoded = encodeURIComponent(truncatedMessage);
   const truncatedUrl = `https://wa.me/${phone}?text=${truncatedEncoded}`;
 

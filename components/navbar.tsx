@@ -2,20 +2,17 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { Coffee, ShoppingBag } from 'lucide-react';
+import { Coffee, ShoppingBag, LayoutDashboard } from 'lucide-react';
 import { useCartStore } from '@/store/cart-store';
+import { useMounted } from '@/hooks/use-mounted';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { CartDrawer } from '@/components/cart-drawer';
 import { Button } from '@/components/ui/button';
 
 export function Navbar() {
   const getItemCount = useCartStore((state) => state.getItemCount);
-  const [mounted, setMounted] = React.useState(false);
+  const mounted = useMounted();
   const [isDrawerOpen, setIsDrawerOpen] = React.useState(false);
-
-  React.useEffect(() => {
-    setMounted(true);
-  }, []);
 
   const itemCount = mounted ? getItemCount() : 0;
 
@@ -41,6 +38,18 @@ export function Navbar() {
           </Link>
 
           <div className="flex items-center gap-2">
+            <Link href="/admin/orders">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="rounded-full text-xs gap-1.5 text-muted-foreground hover:text-foreground hidden sm:inline-flex"
+                title="Staff Orders Dashboard"
+              >
+                <LayoutDashboard className="w-3.5 h-3.5 text-primary" />
+                <span>Staff Portal</span>
+              </Button>
+            </Link>
+
             <ThemeToggle />
 
             <Button

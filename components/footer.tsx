@@ -1,5 +1,6 @@
 import React from 'react';
-import { Coffee, MapPin, Clock, Heart } from 'lucide-react';
+import Link from 'next/link';
+import { Coffee, MapPin, Clock, Heart, Shield } from 'lucide-react';
 
 export function Footer() {
   return (
@@ -23,6 +24,12 @@ export function Footer() {
             <span className="flex items-center gap-1">
               <Clock className="w-3.5 h-3.5 text-primary" /> Open 8 AM – 10 PM
             </span>
+            <Link
+              href="/admin/orders"
+              className="flex items-center gap-1 hover:text-primary transition-colors font-medium"
+            >
+              <Shield className="w-3.5 h-3.5 text-primary" /> Staff Portal
+            </Link>
           </div>
         </div>
 
