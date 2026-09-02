@@ -27,11 +27,22 @@ interface StoredOrderSession {
   whatsappUrl: string;
 }
 
+let cachedRaw: string | null = null;
+let cachedSnapshot: StoredOrderSession | null = null;
+
 function getStoredOrderSession(): StoredOrderSession | null {
   if (typeof window === 'undefined') return null;
   try {
     const raw = sessionStorage.getItem('latestOrder');
-    return raw ? JSON.parse(raw) : null;
+    // If the string hasn't changed, return the SAME object reference
+    // instead of re-parsing — this is what useSyncExternalStore needs
+    // to avoid thinking the store changed on every render.
+    if (raw === cachedRaw) {
+      return cachedSnapshot;
+    }
+    cachedRaw = raw;
+    cachedSnapshot = raw ? JSON.parse(raw) : null;
+    return cachedSnapshot;
   } catch {
     return null;
   }
