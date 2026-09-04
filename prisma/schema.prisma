@@ -27,10 +27,10 @@ model User {
   cafeId       String
   name         String
   email        String   @unique
-  passwordHash String?
   role         UserRole @default(OWNER)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+  passwordHash String?
   cafe         Cafe     @relation(fields: [cafeId], references: [id])
 
   @@index([cafeId])
@@ -136,5 +136,3 @@ enum OrderStatus {
   COMPLETED
   CANCELLED
 }
-
-
