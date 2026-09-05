@@ -23,26 +23,26 @@ export function formatOrderReference(orderId: string): string {
 }
 
 export async function POST(request: Request) {
-  let body: unknown;
-
   try {
-    body = await request.json();
-  } catch {
-    return Response.json(
-      { error: "INVALID_JSON", message: "Request body must contain valid JSON." },
-      { status: 400 }
-    );
-  }
+    let body: unknown;
 
-  const parsed = validateCreateOrderInput(body);
-  if (!parsed.success) {
-    return Response.json(
-      { error: "VALIDATION_ERROR", message: "Order request is invalid.", details: parsed.errors },
-      { status: 400 }
-    );
-  }
+    try {
+      body = await request.json();
+    } catch {
+      return Response.json(
+        { error: "INVALID_JSON", message: "Request body must contain valid JSON." },
+        { status: 400 }
+      );
+    }
 
-  try {
+    const parsed = validateCreateOrderInput(body);
+    if (!parsed.success) {
+      return Response.json(
+        { error: "VALIDATION_ERROR", message: "Order request is invalid.", details: parsed.errors },
+        { status: 400 }
+      );
+    }
+
     const prisma = getPrisma();
     const order = await prisma.$transaction(async (tx) => {
       const cafe = await tx.cafe.findUnique({
@@ -163,8 +163,10 @@ export async function POST(request: Request) {
     }
 
     console.error("Failed to create order:", error);
+    const message =
+      error instanceof Error ? error.message : "Unable to create the order in the database.";
     return Response.json(
-      { error: "INTERNAL_ERROR", message: "Unable to create the order in the database." },
+      { error: "INTERNAL_ERROR", message },
       { status: 500 }
     );
   }
