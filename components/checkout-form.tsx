@@ -12,6 +12,13 @@ import { Button } from '@/components/ui/button';
 import { Sparkles, Send, Loader2, Mail, Phone, MapPin, User, FileText } from 'lucide-react';
 import { toast } from 'sonner';
 
+interface OrderApiResponse {
+  order?: ServerOrder;
+  error?: string;
+  message?: string;
+  details?: string[];
+}
+
 export function CheckoutForm() {
   const router = useRouter();
   const items = useCartStore((state) => state.items);
@@ -58,14 +65,37 @@ export function CheckoutForm() {
         body: JSON.stringify(payload),
       });
 
-      const result = await response.json();
+      // Safely parse JSON response if available
+      let result: OrderApiResponse | null = null;
+      const contentType = response.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        try {
+          result = await response.json();
+        } catch {
+          result = null;
+        }
+      }
 
       if (!response.ok) {
-        const errorMsg =
-          result.details && Array.isArray(result.details)
-            ? result.details.join(', ')
-            : result.message || 'Failed to place order. Please try again.';
+        let errorMsg = 'Failed to place order. Please try again.';
+        if (result) {
+          if (result.details && Array.isArray(result.details)) {
+            errorMsg = result.details.join(', ');
+          } else if (result.message) {
+            errorMsg = result.message;
+          } else if (result.error) {
+            errorMsg = result.error;
+          }
+        } else if (response.status === 405 || response.status === 307) {
+          errorMsg = 'Order creation temporarily unavailable. Please try again.';
+        } else {
+          errorMsg = `Server error (${response.status}). Please try again.`;
+        }
         throw new Error(errorMsg);
+      }
+
+      if (!result || !result.order) {
+        throw new Error('Received an unexpected response from the server. Please try again.');
       }
 
       const serverOrder: ServerOrder = result.order;

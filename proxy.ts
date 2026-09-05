@@ -7,7 +7,13 @@ export default withAuth(
   },
   {
     callbacks: {
-      authorized: ({ token }) => !!token,
+      authorized: ({ req, token }) => {
+        // Customer ordering: POST /api/orders is public
+        if (req.nextUrl.pathname === '/api/orders' && req.method === 'POST') {
+          return true;
+        }
+        return !!token;
+      },
     },
     pages: {
       signIn: '/staff/login',
@@ -16,5 +22,6 @@ export default withAuth(
 );
 
 export const config = {
-  matcher: ['/admin/:path*', '/api/orders/:path*'],
+  // Only protect admin pages — customer ordering (/api/orders) is public
+  matcher: ['/admin/:path*'],
 };
