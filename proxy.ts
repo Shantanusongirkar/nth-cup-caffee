@@ -12,6 +12,14 @@ export default withAuth(
         if (req.nextUrl.pathname === '/api/orders' && req.method === 'POST') {
           return true;
         }
+        // Public order tracking
+        if (req.nextUrl.pathname === '/api/orders/track') {
+          return true;
+        }
+        // Public menu endpoint
+        if (req.nextUrl.pathname === '/api/menu') {
+          return true;
+        }
         return !!token;
       },
     },
@@ -22,6 +30,6 @@ export default withAuth(
 );
 
 export const config = {
-  // Only protect admin pages — customer ordering (/api/orders) is public
-  matcher: ['/admin/:path*'],
+  // Protect admin pages and admin API routes — customer-facing endpoints are public
+  matcher: ['/admin/:path*', '/api/admin/:path*'],
 };
