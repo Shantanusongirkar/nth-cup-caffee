@@ -15,25 +15,25 @@ export default function StaffLoginPage() {
   const [loading, setLoading] = React.useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
+  e.preventDefault();
+  setLoading(true);
 
-    const result = await signIn('credentials', {
-      email,
-      password,
-      redirect: false,
-    });
+  const result = await signIn('credentials', {
+    email,
+    password,
+    redirect: false,
+  });
 
+  if (result?.error) {
     setLoading(false);
+    toast.error('Invalid email or password');
+    return;
+  }
 
-    if (result?.error) {
-      toast.error('Invalid email or password');
-      return;
-    }
-
-    router.push('/admin/orders');
-    router.refresh();
-  };
+  // Full navigation instead of router.push — ensures the
+  // session cookie is fully applied before the next page loads.
+  window.location.href = '/admin/orders';
+};
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background px-4">
