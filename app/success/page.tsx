@@ -16,6 +16,7 @@ import {
   MapPin,
   FileText,
   Clock,
+  Search,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatPaiseToRupees } from '@/utils/whatsapp';
@@ -262,6 +263,16 @@ export default function SuccessPage() {
                 </>
               )}
             </Button>
+
+            <Link href="/track" className="w-full block">
+              <Button
+                variant="outline"
+                className="w-full py-5 rounded-full gap-2 border-border text-foreground hover:bg-muted text-xs font-semibold"
+              >
+                <Search className="w-4 h-4" />
+                <span>Track Order Status</span>
+              </Button>
+            </Link>
           </div>
         </div>
       ) : (

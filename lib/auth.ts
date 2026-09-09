@@ -3,6 +3,26 @@ import CredentialsProvider from 'next-auth/providers/credentials';
 import bcrypt from 'bcryptjs';
 import { getPrisma } from './prisma';
 
+interface AuthUser {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  cafeId: string;
+}
+
+interface AuthToken {
+  role?: string;
+  id?: string;
+  cafeId?: string;
+  name?: string;
+  email?: string;
+  sub?: string;
+  iat?: number;
+  exp?: number;
+  jti?: string;
+}
+
 export const authOptions: NextAuthOptions = {
   session: {
     strategy: 'jwt',
@@ -40,6 +60,7 @@ export const authOptions: NextAuthOptions = {
           email: user.email,
           name: user.name,
           role: user.role,
+          cafeId: user.cafeId,
         };
       },
     }),
@@ -47,15 +68,19 @@ export const authOptions: NextAuthOptions = {
   callbacks: {
     async jwt({ token, user }) {
       if (user) {
-        token.role = (user as any).role;
-        token.id = (user as any).id;
+        const authUser = user as unknown as AuthUser;
+        token.role = authUser.role;
+        token.id = authUser.id;
+        token.cafeId = authUser.cafeId;
       }
       return token;
     },
     async session({ session, token }) {
       if (session.user) {
-        (session.user as any).role = token.role;
-        (session.user as any).id = token.id;
+        const authToken = token as unknown as AuthToken;
+        (session.user as unknown as AuthUser).role = authToken.role || '';
+        (session.user as unknown as AuthUser).id = authToken.id || '';
+        (session.user as unknown as AuthUser).cafeId = authToken.cafeId || '';
       }
       return session;
     },

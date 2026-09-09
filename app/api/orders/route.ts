@@ -1,8 +1,22 @@
 import { validateCreateOrderInput } from "@/lib/order-validation";
 import { getPrisma } from "@/lib/prisma";
 import { OrderStatus } from "@/types";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+import type { Session } from "next-auth";
 
 export const runtime = "nodejs";
+
+interface SessionUser {
+  id?: string;
+  role?: string;
+  cafeId?: string;
+}
+
+function getSessionCafeId(session: Session | null | undefined): string | null {
+  const user = session?.user as SessionUser | undefined;
+  return user?.cafeId ?? null;
+}
 
 // Standard 5% tax rate for cafe dining items.
 const TAX_RATE = 0.05;
@@ -174,30 +188,28 @@ export async function POST(request: Request) {
 
 export async function GET(request: Request) {
   try {
+    // Authenticated — only the logged-in staff member's own cafe orders
+    const session = await getServerSession(authOptions);
+    const cafeId = getSessionCafeId(session);
+    if (!cafeId) {
+      return Response.json(
+        { error: "UNAUTHORIZED", message: "Authentication required." },
+        { status: 401 }
+      );
+    }
+
     const { searchParams } = new URL(request.url);
-    const cafeSlug = searchParams.get("cafeSlug") || "nth-cup-demo";
     const statusParam = searchParams.get("status")?.toUpperCase();
     const limit = Math.min(Math.max(parseInt(searchParams.get("limit") || "50", 10), 1), 100);
     const page = Math.max(parseInt(searchParams.get("page") || "1", 10), 1);
     const skip = (page - 1) * limit;
 
     const prisma = getPrisma();
-    const cafe = await prisma.cafe.findUnique({
-      where: { slug: cafeSlug },
-      select: { id: true },
-    });
-
-    if (!cafe) {
-      return Response.json(
-        { error: "NOT_FOUND", message: `Cafe '${cafeSlug}' not found.` },
-        { status: 404 }
-      );
-    }
 
     const whereClause: {
       cafeId: string;
       status?: OrderStatus;
-    } = { cafeId: cafe.id };
+    } = { cafeId };
 
     if (
       statusParam &&
@@ -236,7 +248,7 @@ export async function GET(request: Request) {
 
     const todayOrders = await prisma.order.findMany({
       where: {
-        cafeId: cafe.id,
+        cafeId,
         createdAt: { gte: todayStart },
       },
       select: {

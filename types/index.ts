@@ -76,3 +76,25 @@ export interface AdminOrderStats {
   completedOrders: number;
   todayRevenueInPaise: number;
 }
+
+export interface AdminProduct {
+  id: string;
+  cafeId: string;
+  sku: string;
+  name: string;
+  description: string;
+  priceInPaise: number;
+  imageUrl: string | null;
+  category: string;
+  isAvailable: boolean;
+  createdAt: string | Date;
+  updatedAt: string | Date;
+  _count?: { orderItems: number };
+}
+
+export interface AdminProductStats {
+  totalProducts: number;
+  availableProducts: number;
+  unavailableProducts: number;
+  categories: number;
+}

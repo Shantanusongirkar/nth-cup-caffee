@@ -1,8 +1,22 @@
 import { getPrisma } from "@/lib/prisma";
 import { validateUpdateOrderStatusInput } from "@/lib/order-validation";
 import { formatOrderReference } from "../route";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+import type { Session } from "next-auth";
 
 export const runtime = "nodejs";
+
+interface SessionUser {
+  id?: string;
+  role?: string;
+  cafeId?: string;
+}
+
+function getSessionCafeId(session: Session | null | undefined): string | null {
+  const user = session?.user as SessionUser | undefined;
+  return user?.cafeId ?? null;
+}
 
 export async function PATCH(
   request: Request,
@@ -14,6 +28,16 @@ export async function PATCH(
     return Response.json(
       { error: "INVALID_ID", message: "Order ID parameter is required." },
       { status: 400 }
+    );
+  }
+
+  // Authenticated — staff only
+  const session = await getServerSession(authOptions);
+  const cafeId = getSessionCafeId(session);
+  if (!cafeId) {
+    return Response.json(
+      { error: "UNAUTHORIZED", message: "Authentication required." },
+      { status: 401 }
     );
   }
 
@@ -38,9 +62,10 @@ export async function PATCH(
   try {
     const prisma = getPrisma();
 
-    // Check if order exists
-    const existingOrder = await prisma.order.findUnique({
-      where: { id },
+    // Check the order exists AND belongs to the logged-in user's cafe.
+    // Return 404 (not 403) so we don't leak existence of orders in other cafes.
+    const existingOrder = await prisma.order.findFirst({
+      where: { id, cafeId },
       select: { id: true },
     });
 
