@@ -8,12 +8,23 @@ function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** Customer-facing order reference format: NC- followed by at least 4 alphanumerics (e.g. NC-A1B2C3D4). */
+export const ORDER_REF_REGEX = /^NC-[A-Z0-9]{4,}$/;
+
+/** Returns true when a raw reference matches the NC-XXXXXXXX format (case-insensitive). */
+export function isValidOrderReference(ref: string): boolean {
+  return ORDER_REF_REGEX.test(ref.trim().toUpperCase());
+}
+
 /**
  * Strips the NC- prefix and any non-alphanumeric characters from an order reference,
  * returning the raw ID portion (first 8 chars, uppercased).
  */
 export function parseOrderReference(ref: string): string | null {
-  const cleaned = ref.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+  const cleaned = ref
+    .replace(/^NC-/i, "")
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .toUpperCase();
   if (cleaned.length < 1) return null;
   return cleaned.slice(0, 8);
 }
@@ -37,7 +48,7 @@ export function validateTrackingInput(value: unknown): TrackingResult {
   const orderRef = value.orderRef.trim().toUpperCase();
 
   // Validate format: NC-XXXXXXXX (NC- prefix followed by alphanumeric)
-  if (!/^NC-[A-Z0-9]{4,}$/.test(orderRef)) {
+  if (!isValidOrderReference(orderRef)) {
     errors.push("orderRef must be in the format NC-XXXXXXXX (e.g. NC-A1B2C3D4).");
     return { success: false, errors };
   }

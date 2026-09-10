@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { ServerOrder, OrderStatus, AdminOrderStats } from '@/types';
+import { ServerOrder, OrderStatus, AdminOrderStats, OrderPaymentStatus } from '@/types';
 import { formatPaiseToRupees } from '@/utils/whatsapp';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -57,6 +57,40 @@ const STATUS_CONFIG: Record<
     text: 'text-rose-700 dark:text-rose-300',
     border: 'border-rose-500/30',
     icon: XCircle,
+  },
+};
+
+const PAYMENT_CONFIG: Record<
+  OrderPaymentStatus,
+  { label: string; bg: string; text: string; border: string; icon: React.ComponentType<{ className?: string }> }
+> = {
+  UNPAID: {
+    label: 'Unpaid',
+    bg: 'bg-amber-500/10 dark:bg-amber-500/20',
+    text: 'text-amber-700 dark:text-amber-300',
+    border: 'border-amber-500/30',
+    icon: IndianRupee,
+  },
+  PAID: {
+    label: 'Paid',
+    bg: 'bg-emerald-500/10 dark:bg-emerald-500/20',
+    text: 'text-emerald-700 dark:text-emerald-300',
+    border: 'border-emerald-500/30',
+    icon: Check,
+  },
+  FAILED: {
+    label: 'Payment Failed',
+    bg: 'bg-rose-500/10 dark:bg-rose-500/20',
+    text: 'text-rose-700 dark:text-rose-300',
+    border: 'border-rose-500/30',
+    icon: XCircle,
+  },
+  REFUNDED: {
+    label: 'Refunded',
+    bg: 'bg-muted',
+    text: 'text-muted-foreground',
+    border: 'border-border',
+    icon: ArrowLeft,
   },
 };
 
@@ -542,7 +576,23 @@ export default function AdminOrdersPage() {
                 {/* Card Footer: Totals & Action Buttons */}
                 <div className="space-y-3 pt-2 border-t border-border/40">
                   <div className="flex items-center justify-between text-xs">
-                    <span className="text-muted-foreground font-medium">Order Total</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-muted-foreground font-medium">Order Total</span>
+                      {(() => {
+                        const paymentStyle =
+                          PAYMENT_CONFIG[order.paymentStatus || 'UNPAID'] || PAYMENT_CONFIG.UNPAID;
+                        const PaymentIcon = paymentStyle.icon;
+                        return (
+                          <span
+                            title={order.razorpayPaymentId ? `Razorpay payment ${order.razorpayPaymentId}` : undefined}
+                            className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border ${paymentStyle.bg} ${paymentStyle.text} ${paymentStyle.border}`}
+                          >
+                            <PaymentIcon className="w-3 h-3" />
+                            <span>{paymentStyle.label}</span>
+                          </span>
+                        );
+                      })()}
+                    </div>
                     <span className="font-extrabold text-base text-foreground font-heading">
                       {formatPaiseToRupees(order.totalInPaise)}
                     </span>

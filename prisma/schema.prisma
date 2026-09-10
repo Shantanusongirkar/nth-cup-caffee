@@ -72,21 +72,24 @@ model Product {
 }
 
 model Order {
-  id              String      @id @default(uuid())
-  cafeId          String
-  customerId      String
-  status          OrderStatus @default(PENDING)
-  tableNumber     String?
-  notes           String?
-  subtotalInPaise Int
-  taxInPaise      Int         @default(0)
-  totalInPaise    Int
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
-  feedback        Feedback[]
-  cafe            Cafe        @relation(fields: [cafeId], references: [id])
-  customer        Customer    @relation(fields: [customerId], references: [id])
-  items           OrderItem[]
+  id                String            @id @default(uuid())
+  cafeId            String
+  customerId        String
+  status            OrderStatus       @default(PENDING)
+  paymentStatus     OrderPaymentStatus @default(UNPAID)
+  razorpayOrderId   String?
+  razorpayPaymentId String?
+  tableNumber       String?
+  notes             String?
+  subtotalInPaise   Int
+  taxInPaise        Int               @default(0)
+  totalInPaise      Int
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  feedback          Feedback[]
+  cafe              Cafe              @relation(fields: [cafeId], references: [id])
+  customer          Customer          @relation(fields: [customerId], references: [id])
+  items             OrderItem[]
 
   @@index([cafeId, createdAt])
   @@index([customerId, createdAt])
@@ -135,6 +138,13 @@ enum OrderStatus {
   CONFIRMED
   COMPLETED
   CANCELLED
+}
+
+enum OrderPaymentStatus {
+  UNPAID
+  PAID
+  FAILED
+  REFUNDED
 }
 
 
