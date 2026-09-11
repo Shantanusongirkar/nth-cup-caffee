@@ -3,7 +3,7 @@ export interface MenuItem {
   name: string;
   description: string;
   price: number;
-  image: string;
+  image?: string;
   category: MenuCategory;
   available: boolean;
 }
@@ -38,6 +38,8 @@ export interface CartStore {
 
 export type OrderStatus = 'PENDING' | 'CONFIRMED' | 'COMPLETED' | 'CANCELLED';
 
+export type OrderPaymentStatus = 'UNPAID' | 'PAID' | 'FAILED' | 'REFUNDED';
+
 export interface ServerCustomer {
   id?: string;
   name: string;
@@ -60,6 +62,10 @@ export interface ServerOrder {
   customerId?: string;
   customer: ServerCustomer;
   status: OrderStatus;
+  paymentStatus?: OrderPaymentStatus;
+  razorpayOrderId?: string | null;
+  razorpayPaymentId?: string | null;
+  payment?: { keyId?: string | null; orderId?: string | null };
   tableNumber?: string | null;
   notes?: string | null;
   subtotalInPaise: number;

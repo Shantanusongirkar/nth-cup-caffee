@@ -19,6 +19,129 @@ interface OrderApiResponse {
   details?: string[];
 }
 
+/* ---------- Razorpay (client-side) ---------- */
+
+interface RazorpayResponse {
+  razorpay_payment_id?: string;
+  razorpay_order_id?: string;
+  razorpay_signature?: string;
+}
+
+interface RazorpayInstance {
+  open: () => void;
+  on: (event: string, handler: (response: unknown) => void) => void;
+}
+
+interface RazorpayOptions {
+  key: string;
+  amount: number;
+  currency: string;
+  name: string;
+  description?: string;
+  order_id: string;
+  prefill?: { name?: string; email?: string; contact?: string };
+  handler?: (response: RazorpayResponse) => void;
+  modal?: { ondismiss?: () => void };
+}
+
+interface RazorpayConstructor {
+  new (options: RazorpayOptions): RazorpayInstance;
+}
+
+declare global {
+  interface Window {
+    Razorpay?: RazorpayConstructor;
+  }
+}
+
+let razorpayScriptPromise: Promise<boolean> | null = null;
+
+function loadRazorpayScript(): Promise<boolean> {
+  if (typeof window === 'undefined') return Promise.resolve(false);
+  if (typeof window.Razorpay !== 'undefined') return Promise.resolve(true);
+  if (!razorpayScriptPromise) {
+    razorpayScriptPromise = new Promise((resolve) => {
+      const script = document.createElement('script');
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.async = true;
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.head.appendChild(script);
+    });
+  }
+  return razorpayScriptPromise;
+}
+
+type PaymentOutcome = 'paid' | 'failed' | 'unpaid';
+
+function openRazorpayCheckout(opts: {
+  order: ServerOrder;
+  keyId: string;
+}) {
+  return new Promise<PaymentOutcome>((resolve) => {
+    const Razorpay = window.Razorpay;
+    if (!Razorpay || !opts.order.razorpayOrderId) {
+      resolve('unpaid');
+      return;
+    }
+
+    let settled = false;
+    const settle = (outcome: PaymentOutcome) => {
+      if (!settled) {
+        settled = true;
+        resolve(outcome);
+      }
+    };
+
+    const handlePaymentResponse = async (response: RazorpayResponse) => {
+      // Only the server can confirm a payment, via signature verification.
+      if (!response.razorpay_payment_id) {
+        settle('failed');
+        return;
+      }
+
+      try {
+        const res = await fetch(`/api/orders/${opts.order.id}/verify-payment`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({
+            razorpayPaymentId: response.razorpay_payment_id,
+            razorpaySignature: response.razorpay_signature,
+          }),
+        });
+        const data = (await res.json().catch(() => ({}))) as {
+          success?: boolean;
+          paymentStatus?: string;
+        };
+        settle(res.ok && data.success === true && data.paymentStatus === 'PAID' ? 'paid' : 'failed');
+      } catch {
+        settle('failed');
+      }
+    };
+
+    const rzp = new Razorpay({
+      key: opts.keyId,
+      amount: opts.order.totalInPaise,
+      currency: 'INR',
+      name: 'Nth Cup Caffee',
+      description: `Order ${opts.order.orderReference}`,
+      order_id: opts.order.razorpayOrderId,
+      prefill: {
+        name: opts.order.customer.name,
+        email: opts.order.customer.email ?? undefined,
+        contact: opts.order.customer.phone ?? undefined,
+      },
+      handler: handlePaymentResponse,
+      modal: {
+        ondismiss: () => settle('unpaid'),
+      },
+    });
+
+    rzp.on('payment.failed', () => settle('failed'));
+    rzp.open();
+  });
+}
+
 export function CheckoutForm() {
   const router = useRouter();
   const items = useCartStore((state) => state.items);
@@ -100,6 +223,21 @@ export function CheckoutForm() {
 
       const serverOrder: ServerOrder = result.order;
 
+      // If the server prepared an online payment, open the Razorpay checkout
+      // modal. When present, `payment.keyId`/`orderId` guarantee Razorpay is
+      // configured. The order is ALREADY created (UNPAID) at this point, so a
+      // failed or abandoned payment never blocks the order.
+      let paymentOutcome: PaymentOutcome = 'unpaid';
+      if (serverOrder.payment?.keyId && serverOrder.razorpayOrderId) {
+        const scriptLoaded = await loadRazorpayScript();
+        if (scriptLoaded) {
+          paymentOutcome = await openRazorpayCheckout({
+            order: serverOrder,
+            keyId: serverOrder.payment.keyId,
+          });
+        }
+      }
+
       // Generate WhatsApp message directly from the server-created order
       const { url, message, isTruncated } = buildWhatsAppUrlFromOrder(serverOrder);
 
@@ -119,9 +257,23 @@ export function CheckoutForm() {
       // Clear the client cart now that database order is created
       clearCart();
 
-      toast.success('Order placed successfully! Connecting to WhatsApp...', {
-        duration: 2500,
-      });
+      if (paymentOutcome === 'paid') {
+        toast.success('Payment received! Order confirmed. Connecting to WhatsApp...', {
+          duration: 2500,
+        });
+      } else if (paymentOutcome === 'failed') {
+        toast.error('Order placed, but payment failed. You can pay at the counter.', {
+          duration: 4000,
+        });
+      } else if (paymentOutcome === 'unpaid' && serverOrder.payment?.keyId) {
+        toast('Order placed. Payment pending — you can pay at the counter.', {
+          duration: 3000,
+        });
+      } else {
+        toast.success('Order placed successfully! Connecting to WhatsApp...', {
+          duration: 2500,
+        });
+      }
 
       // Attempt to open WhatsApp directly
       try {

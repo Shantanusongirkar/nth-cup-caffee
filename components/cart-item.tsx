@@ -5,7 +5,7 @@ import Image from 'next/image';
 import { CartItem as CartItemType } from '@/types';
 import { useCartStore } from '@/store/cart-store';
 import { QuantitySelector } from '@/components/quantity-selector';
-import { Trash2 } from 'lucide-react';
+import { Trash2, Coffee } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 interface CartItemProps {
@@ -25,14 +25,20 @@ export function CartItem({ cartItem, compact = false }: CartItemProps) {
     <div className="flex items-center gap-3 py-3 border-b border-border/40 last:border-0">
       {/* Thumbnail */}
       <div className="relative h-14 w-14 shrink-0 rounded-xl overflow-hidden bg-muted">
-        <Image
-          src={item.image}
-          alt={item.name}
-          fill
-          sizes="56px"
-          className="object-cover"
-          unoptimized={item.image.endsWith('.svg')}
-        />
+        {item.image ? (
+          <Image
+            src={item.image}
+            alt={item.name}
+            fill
+            sizes="56px"
+            className="object-cover"
+            unoptimized={item.image.endsWith('.svg')}
+          />
+        ) : (
+          <div className="absolute inset-0 flex items-center justify-center text-muted-foreground/50">
+            <Coffee className="w-5 h-5" />
+          </div>
+        )}
       </div>
 
       {/* Details */}
