@@ -71,7 +71,7 @@ export function AdminShell({ children, userName, userEmail, userRole }: AdminShe
   return (
     <div className="min-h-screen flex bg-background text-foreground">
       {/* ── Desktop Sidebar ── */}
-      <aside className="hidden lg:flex lg:flex-col w-60 shrink-0 border-r border-border bg-sidebar">
+      <aside className="hidden lg:flex lg:flex-col w-64 shrink-0 border-r border-border bg-sidebar h-screen sticky top-0">
         {/* Logo / Brand */}
         <div className="flex items-center gap-2.5 px-5 py-5 border-b border-sidebar-border">
           <div className="w-8 h-8 rounded-xl bg-primary flex items-center justify-center shrink-0">
@@ -138,7 +138,7 @@ export function AdminShell({ children, userName, userEmail, userRole }: AdminShe
       </aside>
 
       {/* ── Mobile Header ── */}
-      <div className="flex flex-col flex-1 min-w-0">
+      <div className="flex flex-col flex-1 min-w-0 h-screen overflow-hidden">
         <header className="lg:hidden sticky top-0 z-40 flex items-center justify-between px-4 py-3 border-b border-border bg-sidebar/90 backdrop-blur-md">
           <div className="flex items-center gap-2.5">
             <div className="w-7 h-7 rounded-lg bg-primary flex items-center justify-center">
