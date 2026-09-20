@@ -1,3 +1,5 @@
+
+
 export interface MenuItem {
   id: string;
   name: string;
@@ -9,6 +11,9 @@ export interface MenuItem {
 }
 
 export type MenuCategory = 'coffee' | 'tea' | 'snacks' | 'desserts';
+export type PaymentMethod = 'UPI' | 'CARD' | 'CASH';
+
+
 
 export interface CartItem {
   item: MenuItem;

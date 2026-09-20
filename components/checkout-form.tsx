@@ -42,8 +42,8 @@ interface RazorpayOptions {
   prefill?: { name?: string; email?: string; contact?: string };
   handler?: (response: RazorpayResponse) => void;
   modal?: { ondismiss?: () => void };
+  config?: unknown;
 }
-
 interface RazorpayConstructor {
   new (options: RazorpayOptions): RazorpayInstance;
 }
@@ -77,6 +77,7 @@ type PaymentOutcome = 'paid' | 'failed' | 'unpaid';
 function openRazorpayCheckout(opts: {
   order: ServerOrder;
   keyId: string;
+  preferredMethod: 'upi' | 'card';
 }) {
   return new Promise<PaymentOutcome>((resolve) => {
     const Razorpay = window.Razorpay;
@@ -131,11 +132,23 @@ function openRazorpayCheckout(opts: {
         email: opts.order.customer.email ?? undefined,
         contact: opts.order.customer.phone ?? undefined,
       },
+      config: {
+        display: {
+          blocks: {
+            preferred: {
+              name: 'Recommended',
+              instruments: [{ method: opts.preferredMethod }],
+            },
+          },
+          sequence: ['block.preferred'],
+          preferences: { show_default_blocks: true },
+        },
+      },
       handler: handlePaymentResponse,
       modal: {
         ondismiss: () => settle('unpaid'),
       },
-    });
+    } as RazorpayOptions);
 
     rzp.on('payment.failed', () => settle('failed'));
     rzp.open();
@@ -155,6 +168,14 @@ export function CheckoutForm() {
   const [isSubmitting, setIsSubmitting] = React.useState(false);
 
   const isValid = customerName.trim().length > 0 && items.length > 0;
+  type PaymentUIOption = 'UPI' | 'DEBIT_CARD' | 'CREDIT_CARD' | 'CASH';
+
+  const [paymentOption, setPaymentOption] = React.useState<PaymentUIOption>('UPI');
+
+  function toBackendPaymentMethod(option: PaymentUIOption): 'UPI' | 'CARD' | 'CASH' {
+    if (option === 'DEBIT_CARD' || option === 'CREDIT_CARD') return 'CARD';
+    return option;
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -175,6 +196,7 @@ export function CheckoutForm() {
       })),
       tableNumber: tableNumber.trim() || undefined,
       notes: specialInstructions.trim() || undefined,
+      paymentMethod: toBackendPaymentMethod(paymentOption),
     };
 
     try {
@@ -228,12 +250,17 @@ export function CheckoutForm() {
       // configured. The order is ALREADY created (UNPAID) at this point, so a
       // failed or abandoned payment never blocks the order.
       let paymentOutcome: PaymentOutcome = 'unpaid';
-      if (serverOrder.payment?.keyId && serverOrder.razorpayOrderId) {
+      if (
+        paymentOption !== 'CASH' &&
+        serverOrder.payment?.keyId &&
+        serverOrder.razorpayOrderId
+      ) {
         const scriptLoaded = await loadRazorpayScript();
         if (scriptLoaded) {
           paymentOutcome = await openRazorpayCheckout({
             order: serverOrder,
             keyId: serverOrder.payment.keyId,
+            preferredMethod: paymentOption === 'UPI' ? 'upi' : 'card',
           });
         }
       }
@@ -420,6 +447,43 @@ export function CheckoutForm() {
               </button>
             ))}
           </div>
+        </div>
+      </div>
+
+      {/* Payment Method Selector */}
+      <div className="rounded-2xl border border-border bg-card p-5 sm:p-6 space-y-3 shadow-sm">
+        <h3 className="font-heading font-bold text-base text-foreground border-b border-border/40 pb-2.5">
+          Choose Payment Method
+        </h3>
+        <div className="space-y-2">
+          {(
+            [
+              { id: 'UPI', label: 'UPI (Google Pay, PhonePe, Paytm)' },
+              { id: 'DEBIT_CARD', label: 'Debit Card' },
+              { id: 'CREDIT_CARD', label: 'Credit Card' },
+              { id: 'CASH', label: 'Cash on Table' },
+            ] as const
+          ).map((option) => (
+            <label
+              key={option.id}
+              className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-colors ${
+                paymentOption === option.id
+                  ? 'border-primary bg-primary/5'
+                  : 'border-border/50 hover:bg-muted/40'
+              }`}
+            >
+              <input
+                type="radio"
+                name="paymentOption"
+                value={option.id}
+                checked={paymentOption === option.id}
+                onChange={() => setPaymentOption(option.id)}
+                disabled={isSubmitting}
+                className="accent-primary w-4 h-4"
+              />
+              <span className="text-sm font-medium text-foreground">{option.label}</span>
+            </label>
+          ))}
         </div>
       </div>
 

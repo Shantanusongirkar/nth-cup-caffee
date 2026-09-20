@@ -77,6 +77,7 @@ model Order {
   customerId        String
   status            OrderStatus       @default(PENDING)
   paymentStatus     OrderPaymentStatus @default(UNPAID)
+  paymentMethod     PaymentMethod      @default(CASH)   
   razorpayOrderId   String?
   razorpayPaymentId String?
   tableNumber       String?
@@ -147,4 +148,8 @@ enum OrderPaymentStatus {
   REFUNDED
 }
 
-
+enum PaymentMethod {
+  UPI
+  CARD
+  CASH
+}
