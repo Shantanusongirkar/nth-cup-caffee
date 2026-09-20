@@ -109,3 +109,54 @@ export interface AdminProductStats {
   unavailableProducts: number;
   categories: number;
 }
+
+// ===== Admin CRM Types =====
+
+export interface AdminCustomer {
+  id: string;
+  name: string;
+  phone: string | null;
+  email: string | null;
+  orderCount: number;
+  lifetimeSpendInPaise: number;
+  lastOrderAt: string | null;
+  isDuplicatePhone: boolean;
+}
+
+export interface TopProduct {
+  productId: string;
+  productName: string;
+  imageUrl: string | null;
+  category: string;
+  unitsSold: number;
+  revenueInPaise: number;
+}
+
+export interface DailyRevenue {
+  date: string; // ISO date string YYYY-MM-DD
+  revenueInPaise: number;
+  orderCount: number;
+}
+
+export interface HourlyOrders {
+  hour: number; // 0–23
+  orderCount: number;
+}
+
+export interface CategoryRevenue {
+  category: string;
+  revenueInPaise: number;
+  unitsSold: number;
+}
+
+export interface StatusBreakdown {
+  status: OrderStatus;
+  count: number;
+}
+
+export interface OverviewKPIs {
+  totalOrders: number;
+  revenueInPaise: number;
+  newCustomers: number;
+  avgOrderValueInPaise: number;
+}
