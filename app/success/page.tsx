@@ -264,7 +264,7 @@ export default function SuccessPage() {
               )}
             </Button>
 
-            <Link href="/track" className="w-full block">
+            <Link href={`/track?ref=${order.orderReference}`} className="w-full block">
               <Button
                 variant="outline"
                 className="w-full py-5 rounded-full gap-2 border-border text-foreground hover:bg-muted text-xs font-semibold"

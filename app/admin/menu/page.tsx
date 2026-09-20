@@ -22,10 +22,15 @@ import {
   EyeOff,
   Loader2,
   ExternalLink,
+  ImagePlus,
+  X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
 const CATEGORIES: MenuCategory[] = ['coffee', 'tea', 'snacks', 'desserts'];
+
+const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5 MB
+const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
 const CATEGORY_COLORS: Record<string, { bg: string; text: string; border: string }> = {
   coffee: { bg: 'bg-amber-500/10', text: 'text-amber-700 dark:text-amber-300', border: 'border-amber-500/30' },
@@ -74,6 +79,12 @@ export default function AdminMenuPage() {
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [formErrors, setFormErrors] = React.useState<string[]>([]);
 
+  // Image upload state
+  const [selectedImageFile, setSelectedImageFile] = React.useState<File | null>(null);
+  const [imagePreview, setImagePreview] = React.useState<string | null>(null);
+  const [isUploadingImage, setIsUploadingImage] = React.useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
   const fetchProducts = React.useCallback(async () => {
     try {
       const res = await fetch('/api/admin/products');
@@ -112,13 +123,17 @@ export default function AdminMenuPage() {
   }, []);
 
   const openCreateSheet = () => {
+    if (imagePreview) URL.revokeObjectURL(imagePreview);
     setEditingProduct(null);
     setForm(EMPTY_FORM);
     setFormErrors([]);
+    setSelectedImageFile(null);
+    setImagePreview(null);
     setSheetOpen(true);
   };
 
   const openEditSheet = (product: AdminProduct) => {
+    if (imagePreview) URL.revokeObjectURL(imagePreview);
     setEditingProduct(product);
     setForm({
       sku: product.sku,
@@ -130,6 +145,8 @@ export default function AdminMenuPage() {
       isAvailable: product.isAvailable,
     });
     setFormErrors([]);
+    setSelectedImageFile(null);
+    setImagePreview(null);
     setSheetOpen(true);
   };
 
@@ -191,6 +208,70 @@ export default function AdminMenuPage() {
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleUploadImage = async (file: File) => {
+    if (isUploadingImage) return;
+
+    if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
+      toast.error('Unsupported file type. Use JPG, PNG, or WebP.');
+      return;
+    }
+    if (file.size > MAX_IMAGE_SIZE) {
+      toast.error('Image is too large. Maximum size is 5 MB.');
+      return;
+    }
+
+    const previewUrl = URL.createObjectURL(file);
+    setSelectedImageFile(file);
+    setImagePreview(previewUrl);
+    setIsUploadingImage(true);
+
+    try {
+      const fd = new FormData();
+      fd.append('image', file);
+
+      const res = await fetch('/api/admin/upload', {
+        method: 'POST',
+        body: fd,
+      });
+      const data = (await res.json().catch(() => ({}))) as { url?: string; message?: string };
+
+      if (!res.ok || !data.url) {
+        throw new Error(data.message || 'Failed to upload image.');
+      }
+
+      const uploadedUrl: string = data.url;
+
+      setForm((f) => ({ ...f, imageUrl: uploadedUrl }));
+      toast.success('Image uploaded.');
+    } catch (err) {
+      setSelectedImageFile(null);
+      setImagePreview(null);
+      toast.error(err instanceof Error ? err.message : 'Failed to upload image.');
+    } finally {
+      setIsUploadingImage(false);
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) handleUploadImage(file);
+    e.target.value = '';
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    if (isUploadingImage) return;
+    const file = e.dataTransfer.files?.[0];
+    if (file) handleUploadImage(file);
+  };
+
+  const removeImage = () => {
+    if (imagePreview) URL.revokeObjectURL(imagePreview);
+    setSelectedImageFile(null);
+    setImagePreview(null);
+    setForm((f) => ({ ...f, imageUrl: '' }));
   };
 
   const handleToggleAvailability = async (product: AdminProduct) => {
@@ -270,7 +351,7 @@ export default function AdminMenuPage() {
   }, [products, filterCategory, searchQuery]);
 
   return (
-    <div className="space-y-6 pb-16">
+    <div className="p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto pb-16">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border/40 pb-4">
         <div className="flex items-center gap-3">
@@ -604,16 +685,72 @@ export default function AdminMenuPage() {
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="imageUrl" className="text-xs font-semibold">Image URL <span className="text-muted-foreground font-normal">(optional)</span></Label>
-              <Input
-                id="imageUrl"
-                type="url"
-                placeholder="https://..."
-                value={form.imageUrl}
-                onChange={(e) => setForm((f) => ({ ...f, imageUrl: e.target.value }))}
-                disabled={isSubmitting}
-                className="rounded-xl text-xs"
-              />
+              <Label className="text-xs font-semibold">
+                Product Photo <span className="text-muted-foreground font-normal">(optional)</span>
+              </Label>
+              <div
+                onClick={() => !isUploadingImage && fileInputRef.current?.click()}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={handleDrop}
+                className={`relative flex flex-col items-center justify-center gap-1.5 rounded-xl border-2 border-dashed bg-muted/30 px-3 py-4 text-center cursor-pointer transition-colors ${
+                  isUploadingImage
+                    ? 'opacity-60 cursor-wait'
+                    : 'hover:border-primary/50 hover:bg-primary/5'
+                }`}
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  onChange={handleFileChange}
+                  disabled={isUploadingImage}
+                />
+
+                {isUploadingImage ? (
+                  <>
+                    <Loader2 className="w-6 h-6 animate-spin text-primary" />
+                    <span className="text-xs text-muted-foreground">Uploading image...</span>
+                  </>
+                ) : imagePreview || form.imageUrl ? (
+                  <>
+                    {/* Local object URLs can't be used with next/image — plain <img> is required here. */}
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={imagePreview || form.imageUrl}
+                      alt="Product preview"
+                      className="max-h-32 rounded-lg object-cover border border-border/40"
+                    />
+                    <span className="text-[11px] text-muted-foreground">
+                      Click to replace or drop a new image
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <ImagePlus className="w-6 h-6 text-muted-foreground/70" />
+                    <span className="text-xs font-semibold text-foreground">
+                      Click to upload or drag &amp; drop
+                    </span>
+                    <span className="text-[11px] text-muted-foreground">JPG, PNG or WebP — max 5 MB</span>
+                  </>
+                )}
+              </div>
+
+              {(imagePreview || form.imageUrl) && !isUploadingImage && (
+                <div className="flex items-center justify-between pt-0.5">
+                  <span className="text-[11px] text-muted-foreground truncate pr-2">
+                    {selectedImageFile ? selectedImageFile.name : 'Image saved to Blob storage'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={removeImage}
+                    className="text-[11px] font-semibold text-destructive hover:underline flex items-center gap-1"
+                  >
+                    <X className="w-3 h-3" />
+                    Remove
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="flex items-center gap-3 py-1">

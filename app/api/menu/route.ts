@@ -41,7 +41,7 @@ export async function GET(request: Request) {
       name: product.name,
       description: product.description,
       price: Math.round(product.priceInPaise / 100),
-      image: product.imageUrl || "/menu/cappuccino.png",
+      image: product.imageUrl ?? undefined,
       category: product.category as MenuCategory,
       available: product.isAvailable,
     }));

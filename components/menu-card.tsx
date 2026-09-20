@@ -4,7 +4,7 @@ import * as React from 'react';
 import Image from 'next/image';
 import { MenuItem } from '@/types';
 import { useCartStore } from '@/store/cart-store';
-import { Plus } from 'lucide-react';
+import { Plus, Coffee } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { QuantitySelector } from '@/components/quantity-selector';
@@ -42,14 +42,20 @@ export function MenuCard({ item }: MenuCardProps) {
       <div>
         {/* Image Container */}
         <div className="relative aspect-4/3 w-full overflow-hidden rounded-xl bg-muted/50 mb-3">
-          <Image
-            src={item.image}
-            alt={item.name}
-            fill
-            sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
-            className="object-cover transition-transform duration-500 group-hover:scale-105"
-            unoptimized={item.image.endsWith('.svg')}
-          />
+          {item.image ? (
+            <Image
+              src={item.image}
+              alt={item.name}
+              fill
+              sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+              className="object-cover transition-transform duration-500 group-hover:scale-105"
+              unoptimized={item.image.endsWith('.svg')}
+            />
+          ) : (
+            <div className="absolute inset-0 flex items-center justify-center text-muted-foreground/50">
+              <Coffee className="w-10 h-10" />
+            </div>
+          )}
 
           {!item.available && (
             <div className="absolute inset-0 bg-background/70 backdrop-blur-[2px] flex items-center justify-center">

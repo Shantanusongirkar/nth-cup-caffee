@@ -6,6 +6,7 @@ export interface CreateOrderInput {
   items: Array<{ productSku: string; quantity: number }>;
   tableNumber?: string;
   notes?: string;
+  paymentMethod: "UPI" | "CARD" | "CASH";
 }
 
 type ValidationResult =
@@ -52,6 +53,16 @@ function optionalString(value: unknown, field: string, errors: string[], maxLeng
   return trimmed || undefined;
 }
 
+const VALID_PAYMENT_METHODS = ["UPI", "CARD", "CASH"] as const;
+type PaymentMethodInput = (typeof VALID_PAYMENT_METHODS)[number];
+
+function parsePaymentMethod(value: unknown): PaymentMethodInput {
+  if (typeof value === "string" && (VALID_PAYMENT_METHODS as readonly string[]).includes(value)) {
+    return value as PaymentMethodInput;
+  }
+  return "CASH";
+}
+
 /** Parses untrusted JSON at the HTTP boundary into a typed order request. */
 export function validateCreateOrderInput(value: unknown): ValidationResult {
   const errors: string[] = [];
@@ -63,6 +74,7 @@ export function validateCreateOrderInput(value: unknown): ValidationResult {
   const cafeSlug = requiredString(value.cafeSlug, "cafeSlug", errors, 100);
   const tableNumber = optionalString(value.tableNumber, "tableNumber", errors, 30);
   const notes = optionalString(value.notes, "notes", errors, 1_000);
+  const paymentMethod = parsePaymentMethod(value.paymentMethod);
 
   let customer: CreateOrderInput["customer"] | undefined;
   if (!isRecord(value.customer)) {
@@ -114,7 +126,7 @@ export function validateCreateOrderInput(value: unknown): ValidationResult {
     return { success: false, errors };
   }
 
-  return { success: true, data: { cafeSlug, customer, items, tableNumber, notes } };
+  return { success: true, data: { cafeSlug, customer, items, tableNumber, notes, paymentMethod } };
 }
 
 const VALID_STATUSES: readonly OrderStatus[] = ["PENDING", "CONFIRMED", "COMPLETED", "CANCELLED"] as const;

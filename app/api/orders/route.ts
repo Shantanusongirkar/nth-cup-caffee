@@ -4,6 +4,7 @@ import { OrderStatus } from "@/types";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import type { Session } from "next-auth";
+import { createRazorpayOrder, isRazorpayConfigured } from "@/lib/payments/razorpay";
 
 export const runtime = "nodejs";
 
@@ -162,9 +163,42 @@ export async function POST(request: Request) {
       return createdOrder;
     });
 
+    // Try to create a Razorpay order for online payment. This must never block
+    // or fail order creation: if it fails (or Razorpay is unconfigured) the
+    // order still exists as UNPAID and the customer can pay at the counter.
+    let payment: { keyId: string | null; orderId: string | null } = {
+      keyId: null,
+      orderId: null,
+    };
+
+    if (isRazorpayConfigured() && order.totalInPaise > 0) {
+      try {
+        const receipt = formatOrderReference(order.id);
+        const rzpOrder = await createRazorpayOrder({
+          amountInPaise: order.totalInPaise,
+          receipt,
+          notes: { orderReference: receipt, cafeId: order.cafeId },
+        });
+
+        await prisma.order.update({
+          where: { id: order.id },
+          data: { razorpayOrderId: rzpOrder.id },
+        });
+
+        payment = {
+          keyId: process.env.RAZORPAY_KEY_ID ?? null,
+          orderId: rzpOrder.id,
+        };
+      } catch (error) {
+        console.error(`Failed to create Razorpay order for ${order.id}:`, error);
+      }
+    }
+
     const orderResponse = {
       ...order,
+      razorpayOrderId: payment.orderId ?? order.razorpayOrderId,
       orderReference: formatOrderReference(order.id),
+      payment,
     };
 
     return Response.json({ order: orderResponse }, { status: 201 });

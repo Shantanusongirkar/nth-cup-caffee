@@ -1,13 +1,15 @@
 'use client';
 
 import * as React from 'react';
+import { Fragment, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import {
   Search,
   Coffee,
-  Clock,
   CheckCircle2,
   XCircle,
   Loader2,
@@ -16,65 +18,56 @@ import {
   MapPin,
   User,
   ArrowLeft,
+  ClipboardList,
+  RefreshCw,
 } from 'lucide-react';
-import Link from 'next/link';
 import { toast } from 'sonner';
 import { formatPaiseToRupees } from '@/utils/whatsapp';
 import { OrderStatus } from '@/types';
+import { isValidOrderReference } from '@/lib/order-tracking-validation';
 
-const STATUS_TIMELINE: {
+const POLL_INTERVAL_MS = 7000;
+
+const TERMINAL_STATUSES: OrderStatus[] = ['COMPLETED', 'CANCELLED'];
+
+const STEPS: Array<{
   status: OrderStatus;
   label: string;
+  hint: string;
   icon: React.ComponentType<{ className?: string }>;
-  color: string;
-  bgColor: string;
-  borderColor: string;
-  ringColor: string;
-}[] = [
+}> = [
   {
     status: 'PENDING',
-    label: 'Order Placed',
-    icon: Clock,
-    color: 'text-amber-700 dark:text-amber-300',
-    bgColor: 'bg-amber-500/10 dark:bg-amber-500/20',
-    borderColor: 'border-amber-500/30',
-    ringColor: 'ring-amber-500/20',
+    label: 'Placed',
+    hint: 'We received your order.',
+    icon: ClipboardList,
   },
   {
     status: 'CONFIRMED',
-    label: 'Confirmed / Brewing',
+    label: 'Preparing',
+    hint: 'Our barista is making it now.',
     icon: Coffee,
-    color: 'text-blue-700 dark:text-blue-300',
-    bgColor: 'bg-blue-500/10 dark:bg-blue-500/20',
-    borderColor: 'border-blue-500/30',
-    ringColor: 'ring-blue-500/20',
   },
   {
     status: 'COMPLETED',
-    label: 'Ready for Pickup',
+    label: 'Ready/Served',
+    hint: 'Enjoy your order!',
     icon: CheckCircle2,
-    color: 'text-emerald-700 dark:text-emerald-300',
-    bgColor: 'bg-emerald-500/10 dark:bg-emerald-500/20',
-    borderColor: 'border-emerald-500/30',
-    ringColor: 'ring-emerald-500/20',
   },
 ];
 
-const CANCELLED_STATUS = {
-  status: 'CANCELLED' as OrderStatus,
-  label: 'Cancelled',
-  icon: XCircle,
-  color: 'text-rose-700 dark:text-rose-300',
-  bgColor: 'bg-rose-500/10 dark:bg-rose-500/20',
-  borderColor: 'border-rose-500/30',
-  ringColor: 'ring-rose-500/20',
+const CANCELLED_HINTS: Record<OrderStatus, string> = {
+  PENDING: 'We received your order. Hang tight!',
+  CONFIRMED: 'Our barista is preparing your order now.',
+  COMPLETED: 'Your order is ready. Enjoy!',
+  CANCELLED: 'We were unable to fulfil this order. Please talk to the counter.',
 };
 
 interface TrackedOrder {
   id: string;
   orderReference: string;
   status: OrderStatus;
-  customer: { name: string; phone?: string | null };
+  customer: { name: string };
   tableNumber?: string | null;
   notes?: string | null;
   subtotalInPaise: number;
@@ -90,55 +83,181 @@ interface TrackedOrder {
   }>;
 }
 
-export default function TrackOrderPage() {
-  const [orderRef, setOrderRef] = React.useState('');
+function getStepperIndex(status: OrderStatus): number {
+  if (status === 'CANCELLED') return -1;
+  return STEPS.findIndex((step) => step.status === status);
+}
+
+function StepCircle({
+  state,
+  Icon,
+}: {
+  state: 'done' | 'current' | 'upcoming';
+  Icon: React.ComponentType<{ className?: string }>;
+}) {
+  const styles: Record<string, string> = {
+    done: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30',
+    current: 'bg-primary/10 text-primary border-primary/20 ring-2 ring-primary/20 animate-scale-in',
+    upcoming: 'bg-muted text-muted-foreground border-border/40',
+  };
+  return (
+    <div
+      className={`w-12 h-12 sm:w-14 sm:h-14 rounded-full border flex items-center justify-center flex-none transition-all ${styles[state]}`}
+    >
+      {state === 'done' ? (
+        <CheckCircle2 className="w-5 h-5 sm:w-6 sm:h-6" />
+      ) : (
+        <Icon className="w-5 h-5 sm:w-6 sm:h-6" />
+      )}
+    </div>
+  );
+}
+
+function TrackOrderContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const refFromUrl = (searchParams.get('ref') || '').trim();
+
+  const [orderRef, setOrderRef] = React.useState(refFromUrl);
   const [phoneLast4, setPhoneLast4] = React.useState('');
   const [isLooking, setIsLooking] = React.useState(false);
+  const [isPolling, setIsPolling] = React.useState(false);
+  const [isRefreshing, setIsRefreshing] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [order, setOrder] = React.useState<TrackedOrder | null>(null);
 
-  const isValid = orderRef.trim().length >= 4;
+  const lastQueryRef = React.useRef<{ orderRef: string; phoneLast4: string } | null>(null);
+  const pollTimerRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+  const autoLookedUpRef = React.useRef(false);
+  const requestSeqRef = React.useRef(0);
+
+  const clearPollTimer = React.useCallback(() => {
+    if (pollTimerRef.current !== null) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+    setIsPolling(false);
+  }, []);
+
+  const fetchOrder = React.useCallback(
+    async (ref: string, last4: string, opts: { silent?: boolean; manual?: boolean } = {}) => {
+      const params = new URLSearchParams({ orderRef: ref });
+      if (last4.trim()) {
+        params.set('phoneLast4', last4.trim());
+      }
+
+      const seq = ++requestSeqRef.current;
+
+      try {
+        const res = await fetch(`/api/orders/track?${params.toString()}`);
+        const data = await res.json();
+
+        if (seq !== requestSeqRef.current) return;
+
+        if (!res.ok) {
+          if (opts.silent || opts.manual) {
+            clearPollTimer();
+          }
+          throw new Error(data.message || 'Unable to find your order.');
+        }
+
+        setOrder(data.order);
+        lastQueryRef.current = { orderRef: ref, phoneLast4: last4 };
+        setError(null);
+        if (!opts.silent && !opts.manual) {
+          toast.success('Order found!');
+        }
+      } catch (err) {
+        if (seq !== requestSeqRef.current) return;
+        if (!opts.silent) {
+          const msg = err instanceof Error ? err.message : 'Unable to look up your order.';
+          setError(msg);
+          toast.error(msg);
+        }
+      }
+    },
+    [clearPollTimer]
+  );
+
+  // Auto-lookup: only fires when the ?ref= param matches NC-XXXXXXXX.
+  // Invalid formats never hit the API — a render-derived notice is shown instead.
+  React.useEffect(() => {
+    if (autoLookedUpRef.current) return;
+    autoLookedUpRef.current = true;
+
+    if (!refFromUrl || !isValidOrderReference(refFromUrl)) return;
+
+    const frame = requestAnimationFrame(() => {
+      setOrderRef(refFromUrl);
+      void fetchOrder(refFromUrl, '');
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [refFromUrl, fetchOrder]);
+
+  // Polling: run while order is active AND the tab is visible. Stop on terminal states.
+  React.useEffect(() => {
+    const orderStatus = order?.status;
+    const query = lastQueryRef.current;
+
+    if (!orderStatus || TERMINAL_STATUSES.includes(orderStatus) || !query) {
+      clearPollTimer();
+      return;
+    }
+
+    const tick = () => {
+      if (document.visibilityState === 'hidden') return;
+      void fetchOrder(query.orderRef, query.phoneLast4, { silent: true });
+    };
+
+    const startPolling = () => {
+      clearPollTimer();
+      pollTimerRef.current = setInterval(tick, POLL_INTERVAL_MS);
+      setIsPolling(true);
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        clearPollTimer();
+      } else if (orderStatus && !TERMINAL_STATUSES.includes(orderStatus)) {
+        tick();
+        startPolling();
+      }
+    };
+
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    startPolling();
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      clearPollTimer();
+    };
+  }, [order?.status, order?.orderReference, fetchOrder, clearPollTimer]);
+
+  const isValid = isValidOrderReference(orderRef);
+
+  const refFormatHint =
+    refFromUrl && !isValidOrderReference(refFromUrl)
+      ? 'Invalid order reference format — expected something like NC-A1B2C3D4. You can retry below.'
+      : null;
 
   const handleTrack = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isValid || isLooking) return;
-
     setIsLooking(true);
     setError(null);
-    setOrder(null);
-
-    try {
-      const params = new URLSearchParams({
-        orderRef: orderRef.trim().toUpperCase(),
-      });
-      if (phoneLast4.trim()) {
-        params.set('phoneLast4', phoneLast4.trim());
-      }
-
-      const res = await fetch(`/api/orders/track?${params.toString()}`);
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.message || 'Unable to find your order.');
-      }
-
-      setOrder(data.order);
-      toast.success('Order found!');
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Unable to look up your order.';
-      setError(msg);
-      toast.error(msg);
-    } finally {
-      setIsLooking(false);
-    }
+    await fetchOrder(orderRef, phoneLast4);
+    setIsLooking(false);
   };
 
-  const getTimelineIndex = (status: OrderStatus): number => {
-    if (status === 'CANCELLED') return -1;
-    return STATUS_TIMELINE.findIndex((s) => s.status === status);
+  const handleManualRefresh = async () => {
+    const q = lastQueryRef.current;
+    if (!q || isRefreshing) return;
+    setIsRefreshing(true);
+    await fetchOrder(q.orderRef, q.phoneLast4, { manual: true });
+    setIsRefreshing(false);
   };
 
-  const currentIndex = order ? getTimelineIndex(order.status) : -1;
+  const currentIndex = order ? getStepperIndex(order.status) : -1;
 
   return (
     <div className="max-w-2xl mx-auto space-y-6 py-6 pb-16">
@@ -168,13 +287,16 @@ export default function TrackOrderPage() {
               required
               placeholder="e.g. NC-A1B2C3D4"
               value={orderRef}
-              onChange={(e) => setOrderRef(e.target.value)}
+              onChange={(e) => setOrderRef(e.target.value.toUpperCase())}
               className="rounded-xl border-border bg-background font-mono"
               disabled={isLooking}
             />
             <p className="text-[11px] text-muted-foreground">
               Found on your order confirmation or WhatsApp message.
             </p>
+            {refFormatHint && (
+              <p className="text-[11px] text-destructive font-medium">{refFormatHint}</p>
+            )}
           </div>
 
           <div className="space-y-1.5">
@@ -218,7 +340,7 @@ export default function TrackOrderPage() {
 
       {/* Error State */}
       {error && (
-        <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-6 text-center space-y-3">
+        <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-6 text-center space-y-3 animate-fade-in">
           <AlertCircle className="w-8 h-8 text-destructive mx-auto" />
           <p className="text-sm text-foreground font-medium">{error}</p>
           <Button
@@ -235,59 +357,114 @@ export default function TrackOrderPage() {
       {/* Order Result */}
       {order && (
         <div className="space-y-5">
-          {/* Status Timeline */}
+          {/* Status Card */}
           <div className="rounded-2xl border border-border bg-card p-5 sm:p-6 shadow-sm">
-            <h2 className="font-heading font-bold text-sm text-foreground mb-4">Order Status</h2>
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="font-heading font-bold text-sm text-foreground">Order Status</h2>
+
+              {order.status === 'CANCELLED' ? (
+                <span className="text-[11px] font-semibold text-rose-700 dark:text-rose-300 bg-rose-500/10 border border-rose-500/30 px-2.5 py-1 rounded-full">
+                  Cancelled
+                </span>
+              ) : TERMINAL_STATUSES.includes(order.status) ? (
+                <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 px-2.5 py-1 rounded-full">
+                  Final Status
+                </span>
+              ) : isPolling ? (
+                <span className="text-[11px] font-semibold text-primary bg-primary/10 border border-primary/20 px-2.5 py-1 rounded-full flex items-center gap-1.5 animate-fade-in">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  Live · updates every 7s
+                </span>
+              ) : (
+                <span className="text-[11px] font-semibold text-muted-foreground bg-muted px-2.5 py-1 rounded-full flex items-center gap-1.5">
+                  <span className="relative flex w-2 h-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-muted-foreground opacity-60" />
+                    <span className="relative inline-flex rounded-full w-2 h-2 bg-muted-foreground" />
+                  </span>
+                  Paused
+                </span>
+              )}
+            </div>
 
             {order.status === 'CANCELLED' ? (
-              <div className={`flex items-center gap-3 p-3 rounded-xl ${CANCELLED_STATUS.bgColor} border ${CANCELLED_STATUS.borderColor}`}>
-                <div className={`w-10 h-10 rounded-full ${CANCELLED_STATUS.bgColor} ${CANCELLED_STATUS.color} flex items-center justify-center ring-2 ${CANCELLED_STATUS.ringColor}`}>
-                  <XCircle className="w-5 h-5" />
+              <div className="rounded-2xl border border-rose-500/30 bg-rose-500/10 p-6 text-center space-y-2 animate-fade-in">
+                <div className="w-12 h-12 rounded-full bg-rose-500/15 text-rose-600 dark:text-rose-400 flex items-center justify-center mx-auto">
+                  <XCircle className="w-6 h-6" />
                 </div>
-                <div>
-                  <p className={`text-sm font-bold ${CANCELLED_STATUS.color}`}>Order Cancelled</p>
-                  <p className="text-[11px] text-muted-foreground">This order has been cancelled.</p>
-                </div>
+                <p className="font-heading font-bold text-lg text-rose-700 dark:text-rose-300">
+                  Order Cancelled
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {CANCELLED_HINTS.CANCELLED}
+                </p>
               </div>
             ) : (
-              <div className="space-y-0">
-                {STATUS_TIMELINE.map((step, idx) => {
-                  const isPast = currentIndex > idx;
-                  const isCurrent = currentIndex === idx;
-                  const StepIcon = step.icon;
+              <div className="animate-fade-in">
+                {/* Horizontal Stepper */}
+                <div className="w-full">
+                  <div className="flex items-center w-full">
+                    {STEPS.map((step, idx) => {
+                      const isDone = currentIndex > idx || order.status === 'COMPLETED';
+                      const isCurrent = order.status !== 'COMPLETED' && currentIndex === idx;
+                      return (
+                        <Fragment key={step.status}>
+                          {idx > 0 && (
+                            <div
+                              className={`flex-1 h-[3px] rounded-full mx-1.5 sm:mx-2 ${
+                                currentIndex >= idx ? 'bg-emerald-400 dark:bg-emerald-500' : 'bg-muted'
+                              }`}
+                            />
+                          )}
+                          <StepCircle
+                            state={isDone ? 'done' : isCurrent ? 'current' : 'upcoming'}
+                            Icon={step.icon}
+                          />
+                        </Fragment>
+                      );
+                    })}
+                  </div>
+                  <div className="flex items-start w-full mt-2">
+                    {STEPS.map((step, idx) => {
+                      const isDone = currentIndex > idx || order.status === 'COMPLETED';
+                      const isCurrent = order.status !== 'COMPLETED' && currentIndex === idx;
+                      return (
+                        <Fragment key={step.status}>
+                          {idx > 0 && <div className="flex-1" />}
+                          <div className="w-12 sm:w-14 flex-none text-center">
+                            <span
+                              className={`block text-[11px] sm:text-xs font-semibold leading-tight ${
+                                isDone
+                                  ? 'text-emerald-700 dark:text-emerald-300'
+                                  : isCurrent
+                                  ? 'text-primary'
+                                  : 'text-muted-foreground'
+                              }`}
+                            >
+                              {step.label}
+                            </span>
+                          </div>
+                        </Fragment>
+                      );
+                    })}
+                  </div>
+                </div>
 
-                  return (
-                    <div key={step.status} className="flex gap-3">
-                      {/* Icon column */}
-                      <div className="flex flex-col items-center">
-                        <div
-                          className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
-                            isCurrent
-                              ? `${step.bgColor} ${step.color} ring-2 ${step.ringColor}`
-                              : isPast
-                              ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
-                              : 'bg-muted text-muted-foreground'
-                          }`}
-                        >
-                          {isPast ? <CheckCircle2 className="w-5 h-5" /> : <StepIcon className="w-5 h-5" />}
-                        </div>
-                        {idx < STATUS_TIMELINE.length - 1 && (
-                          <div className={`w-0.5 h-6 my-0.5 rounded-full ${isPast || isCurrent ? 'bg-emerald-400 dark:bg-emerald-500' : 'bg-muted'}`} />
-                        )}
-                      </div>
-
-                      {/* Label */}
-                      <div className={`pb-4 ${idx === STATUS_TIMELINE.length - 1 ? 'pb-0' : ''}`}>
-                        <p className={`text-sm font-semibold ${isCurrent ? step.color : isPast ? 'text-emerald-700 dark:text-emerald-300' : 'text-muted-foreground'}`}>
-                          {step.label}
-                        </p>
-                        <p className="text-[11px] text-muted-foreground">
-                          {isCurrent ? 'Current status' : isPast ? 'Completed' : 'Pending'}
-                        </p>
-                      </div>
-                    </div>
-                  );
-                })}
+                {/* Current status hint */}
+                <div className="mt-4 pt-4 border-t border-border/40 flex items-center justify-between gap-3">
+                  <p className="text-xs text-muted-foreground">
+                    {STEPS[currentIndex] ? STEPS[currentIndex].hint : CANCELLED_HINTS.PENDING}
+                  </p>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={isRefreshing}
+                    onClick={handleManualRefresh}
+                    className="rounded-full gap-1.5 text-xs text-muted-foreground hover:text-foreground flex-none"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-primary' : ''}`} />
+                    Refresh
+                  </Button>
+                </div>
               </div>
             )}
           </div>
@@ -384,11 +561,19 @@ export default function TrackOrderPage() {
             )}
           </div>
 
-          {/* Back button */}
+          {/* Track another button */}
           <div className="text-center">
             <Button
               variant="outline"
-              onClick={() => { setOrder(null); setOrderRef(''); setPhoneLast4(''); setError(null); }}
+              onClick={() => {
+                setOrder(null);
+                setError(null);
+                setOrderRef('');
+                lastQueryRef.current = null;
+                requestSeqRef.current++;
+                clearPollTimer();
+                router.replace('/track');
+              }}
               className="rounded-full gap-2 text-xs"
             >
               <ArrowLeft className="w-3.5 h-3.5" />
@@ -408,5 +593,20 @@ export default function TrackOrderPage() {
         </Link>
       </div>
     </div>
+  );
+}
+
+export default function TrackOrderPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="max-w-2xl mx-auto py-6 flex flex-col items-center gap-3 text-muted-foreground">
+          <Loader2 className="w-6 h-6 animate-spin text-primary" />
+          <p className="text-xs">Loading tracking...</p>
+        </div>
+      }
+    >
+      <TrackOrderContent />
+    </Suspense>
   );
 }

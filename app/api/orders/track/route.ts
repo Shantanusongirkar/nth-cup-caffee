@@ -24,10 +24,11 @@ export async function GET(request: Request) {
 
     const prisma = getPrisma();
 
-    // Build the where clause: find by order ID prefix
+    // Build the where clause: find by order ID prefix.
+    // Stored UUIDs are lowercase; order references are uppercased, so match insensitively.
     const orders = await prisma.order.findMany({
       where: {
-        id: { startsWith: orderId },
+        id: { startsWith: orderId, mode: "insensitive" },
       },
       take: 2,
       include: {
@@ -85,7 +86,6 @@ export async function GET(request: Request) {
           status: order.status,
           customer: {
             name: order.customer.name,
-            phone: order.customer.phone,
           },
           tableNumber: order.tableNumber,
           notes: order.notes,
