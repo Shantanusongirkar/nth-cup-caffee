@@ -43,6 +43,9 @@ export function generateWhatsAppMessageFromOrder(order: ServerOrder): string {
     lines.push(`*Tax (5%):* ${formatPaiseToRupees(order.taxInPaise)}`);
   }
   lines.push(`*Total Amount: ${formatPaiseToRupees(order.totalInPaise)}*`);
+  lines.push(
+    `*Payment:* ${order.paymentStatus === "PAID" ? "Paid via UPI ✅" : "Pay at counter"}`
+  );
   lines.push("");
 
   if (order.notes) {

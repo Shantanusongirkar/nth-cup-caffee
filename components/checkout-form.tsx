@@ -11,148 +11,18 @@ import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Sparkles, Send, Loader2, Mail, Phone, MapPin, User, FileText } from 'lucide-react';
 import { toast } from 'sonner';
+import { UpiPaymentPanel } from '@/components/upi-payment-panel';
+import {
+  loadRazorpayScript,
+  openRazorpayCheckout,
+  type PaymentOutcome,
+} from '@/lib/razorpay-checkout';
 
 interface OrderApiResponse {
   order?: ServerOrder;
   error?: string;
   message?: string;
   details?: string[];
-}
-
-/* ---------- Razorpay (client-side) ---------- */
-
-interface RazorpayResponse {
-  razorpay_payment_id?: string;
-  razorpay_order_id?: string;
-  razorpay_signature?: string;
-}
-
-interface RazorpayInstance {
-  open: () => void;
-  on: (event: string, handler: (response: unknown) => void) => void;
-}
-
-interface RazorpayOptions {
-  key: string;
-  amount: number;
-  currency: string;
-  name: string;
-  description?: string;
-  order_id: string;
-  prefill?: { name?: string; email?: string; contact?: string };
-  handler?: (response: RazorpayResponse) => void;
-  modal?: { ondismiss?: () => void };
-  config?: unknown;
-}
-interface RazorpayConstructor {
-  new (options: RazorpayOptions): RazorpayInstance;
-}
-
-declare global {
-  interface Window {
-    Razorpay?: RazorpayConstructor;
-  }
-}
-
-let razorpayScriptPromise: Promise<boolean> | null = null;
-
-function loadRazorpayScript(): Promise<boolean> {
-  if (typeof window === 'undefined') return Promise.resolve(false);
-  if (typeof window.Razorpay !== 'undefined') return Promise.resolve(true);
-  if (!razorpayScriptPromise) {
-    razorpayScriptPromise = new Promise((resolve) => {
-      const script = document.createElement('script');
-      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-      script.async = true;
-      script.onload = () => resolve(true);
-      script.onerror = () => resolve(false);
-      document.head.appendChild(script);
-    });
-  }
-  return razorpayScriptPromise;
-}
-
-type PaymentOutcome = 'paid' | 'failed' | 'unpaid';
-
-function openRazorpayCheckout(opts: {
-  order: ServerOrder;
-  keyId: string;
-  preferredMethod: 'upi' | 'card';
-}) {
-  return new Promise<PaymentOutcome>((resolve) => {
-    const Razorpay = window.Razorpay;
-    if (!Razorpay || !opts.order.razorpayOrderId) {
-      resolve('unpaid');
-      return;
-    }
-
-    let settled = false;
-    const settle = (outcome: PaymentOutcome) => {
-      if (!settled) {
-        settled = true;
-        resolve(outcome);
-      }
-    };
-
-    const handlePaymentResponse = async (response: RazorpayResponse) => {
-      // Only the server can confirm a payment, via signature verification.
-      if (!response.razorpay_payment_id) {
-        settle('failed');
-        return;
-      }
-
-      try {
-        const res = await fetch(`/api/orders/${opts.order.id}/verify-payment`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify({
-            razorpayPaymentId: response.razorpay_payment_id,
-            razorpaySignature: response.razorpay_signature,
-          }),
-        });
-        const data = (await res.json().catch(() => ({}))) as {
-          success?: boolean;
-          paymentStatus?: string;
-        };
-        settle(res.ok && data.success === true && data.paymentStatus === 'PAID' ? 'paid' : 'failed');
-      } catch {
-        settle('failed');
-      }
-    };
-
-    const rzp = new Razorpay({
-      key: opts.keyId,
-      amount: opts.order.totalInPaise,
-      currency: 'INR',
-      name: 'Nth Cup Caffee',
-      description: `Order ${opts.order.orderReference}`,
-      order_id: opts.order.razorpayOrderId,
-      prefill: {
-        name: opts.order.customer.name,
-        email: opts.order.customer.email ?? undefined,
-        contact: opts.order.customer.phone ?? undefined,
-      },
-      config: {
-        display: {
-          blocks: {
-            preferred: {
-              name: 'Recommended',
-              instruments: [{ method: opts.preferredMethod }],
-            },
-          },
-          sequence: ['block.preferred'],
-          preferences: { show_default_blocks: true },
-        },
-      },
-      handler: handlePaymentResponse,
-      modal: {
-        ondismiss: () => settle('unpaid'),
-      },
-    } as RazorpayOptions);
-
-    rzp.on('payment.failed', () => settle('failed'));
-    rzp.open();
-  });
 }
 
 export function CheckoutForm() {
@@ -177,12 +47,29 @@ export function CheckoutForm() {
     return option;
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!isValid || isSubmitting) return;
+  // Embedded UPI flow: the created order is kept in state and reused across
+  // QR regeneration and "change method" trips, so going back and forth on
+  // this page never creates duplicate orders. The cart is NOT cleared until
+  // payment is confirmed or the customer chooses "pay at counter".
+  const [createdOrder, setCreatedOrder] = React.useState<ServerOrder | null>(null);
+  const [upiActive, setUpiActive] = React.useState(false);
+  const cartTotal = useCartStore((state) => state.getTotal)();
 
-    setIsSubmitting(true);
+  /** An existing order can be reused when it matches the chosen method (and
+   *  already has a Razorpay Order for CARD popups). */
+  function reusableOrderFor(
+    order: ServerOrder | null,
+    method: 'UPI' | 'CARD' | 'CASH'
+  ): ServerOrder | null {
+    if (!order) return null;
+    if ((order.paymentMethod ?? 'CASH') !== method) return null;
+    if (method === 'CARD' && !order.razorpayOrderId) return null;
+    return order;
+  }
 
+  async function createOrder(
+    method: 'UPI' | 'CARD' | 'CASH'
+  ): Promise<ServerOrder> {
     const payload = {
       cafeSlug: 'nth-cup-demo',
       customer: {
@@ -196,62 +83,162 @@ export function CheckoutForm() {
       })),
       tableNumber: tableNumber.trim() || undefined,
       notes: specialInstructions.trim() || undefined,
-      paymentMethod: toBackendPaymentMethod(paymentOption),
+      paymentMethod: method,
     };
 
-    try {
-      // Create the order on the server. Server computes verified prices and saves to Neon.
-      const response = await fetch('/api/orders', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-        },
-        body: JSON.stringify(payload),
+    // Create the order on the server. Server computes verified prices and saves to Neon.
+    const response = await fetch('/api/orders', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    // Safely parse JSON response if available
+    let result: OrderApiResponse | null = null;
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      try {
+        result = await response.json();
+      } catch {
+        result = null;
+      }
+    }
+
+    if (!response.ok) {
+      let errorMsg = 'Failed to place order. Please try again.';
+      if (result) {
+        if (result.details && Array.isArray(result.details)) {
+          errorMsg = result.details.join(', ');
+        } else if (result.message) {
+          errorMsg = result.message;
+        } else if (result.error) {
+          errorMsg = result.error;
+        }
+      } else if (response.status === 405 || response.status === 307) {
+        errorMsg = 'Order creation temporarily unavailable. Please try again.';
+      } else {
+        errorMsg = `Server error (${response.status}). Please try again.`;
+      }
+      throw new Error(errorMsg);
+    }
+
+    if (!result || !result.order) {
+      throw new Error('Received an unexpected response from the server. Please try again.');
+    }
+
+    return result.order;
+  }
+
+  /** Shared finish for UNPAID orders (cash / pay-at-counter): WhatsApp + success. */
+  const finishUnpaidOrder = React.useCallback(
+    (serverOrder: ServerOrder, paymentOutcome: PaymentOutcome) => {
+    // Generate WhatsApp message directly from the server-created order
+    const { url, message, isTruncated } = buildWhatsAppUrlFromOrder(serverOrder);
+
+    // Save verified server order to session storage for the confirmation page
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem(
+        'latestOrder',
+        JSON.stringify({
+          serverOrder,
+          fullMessage: message,
+          isTruncated,
+          whatsappUrl: url,
+        })
+      );
+    }
+
+    // Clear the client cart now that database order is created
+    clearCart();
+
+    if (paymentOutcome === 'paid') {
+      toast.success('Payment received! Order confirmed. Connecting to WhatsApp...', {
+        duration: 2500,
       });
+    } else if (paymentOutcome === 'failed') {
+      toast.error('Order placed, but payment failed. You can pay at the counter.', {
+        duration: 4000,
+      });
+    } else if (paymentOutcome === 'unpaid' && serverOrder.payment?.keyId) {
+      toast('Order placed. Payment pending — you can pay at the counter.', {
+        duration: 3000,
+      });
+    } else {
+      toast.success('Order placed successfully! Connecting to WhatsApp...', {
+        duration: 2500,
+      });
+    }
 
-      // Safely parse JSON response if available
-      let result: OrderApiResponse | null = null;
-      const contentType = response.headers.get('content-type') || '';
-      if (contentType.includes('application/json')) {
-        try {
-          result = await response.json();
-        } catch {
-          result = null;
-        }
+    // Attempt to open WhatsApp directly
+    try {
+      window.open(url, '_blank');
+    } catch {
+      // Ignored if blocked by browser popup blocker
+    }
+
+    router.push('/success');
+    },
+    [clearCart, router]
+  );
+
+  /** Finish for UPI-paid orders. No `window.open`: this runs after async waits
+   *  with no user gesture and would be popup-blocked — the success page has an
+   *  "Open WhatsApp" button instead. */
+  const finishPaidOrder = React.useCallback(
+    (serverOrder: ServerOrder) => {
+      const paidOrder: ServerOrder = { ...serverOrder, paymentStatus: 'PAID' };
+      const { url, message, isTruncated } = buildWhatsAppUrlFromOrder(paidOrder);
+
+      if (typeof window !== 'undefined') {
+        sessionStorage.setItem(
+          'latestOrder',
+          JSON.stringify({
+            serverOrder: paidOrder,
+            fullMessage: message,
+            isTruncated,
+            whatsappUrl: url,
+          })
+        );
       }
 
-      if (!response.ok) {
-        let errorMsg = 'Failed to place order. Please try again.';
-        if (result) {
-          if (result.details && Array.isArray(result.details)) {
-            errorMsg = result.details.join(', ');
-          } else if (result.message) {
-            errorMsg = result.message;
-          } else if (result.error) {
-            errorMsg = result.error;
-          }
-        } else if (response.status === 405 || response.status === 307) {
-          errorMsg = 'Order creation temporarily unavailable. Please try again.';
-        } else {
-          errorMsg = `Server error (${response.status}). Please try again.`;
-        }
-        throw new Error(errorMsg);
+      clearCart();
+      toast.success('Payment received! Order confirmed.', { duration: 2500 });
+      router.push('/success');
+    },
+    [clearCart, router]
+  );
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!isValid || isSubmitting) return;
+
+    setIsSubmitting(true);
+
+    const method = toBackendPaymentMethod(paymentOption);
+
+    try {
+      // UPI stays embedded: create (or reuse) the order, then swap the form
+      // card for the payment panel in place. OrderSummary stays visible.
+      if (method === 'UPI') {
+        const order = reusableOrderFor(createdOrder, 'UPI') ?? (await createOrder('UPI'));
+        setCreatedOrder(order);
+        setUpiActive(true);
+        setIsSubmitting(false);
+        return;
       }
 
-      if (!result || !result.order) {
-        throw new Error('Received an unexpected response from the server. Please try again.');
-      }
+      const serverOrder = reusableOrderFor(createdOrder, method) ?? (await createOrder(method));
+      setCreatedOrder(serverOrder);
 
-      const serverOrder: ServerOrder = result.order;
-
-      // If the server prepared an online payment, open the Razorpay checkout
-      // modal. When present, `payment.keyId`/`orderId` guarantee Razorpay is
-      // configured. The order is ALREADY created (UNPAID) at this point, so a
-      // failed or abandoned payment never blocks the order.
+      // CARD keeps the Razorpay popup flow; CASH skips it. The order is
+      // ALREADY created (UNPAID), so a failed or abandoned payment never
+      // blocks the order.
       let paymentOutcome: PaymentOutcome = 'unpaid';
       if (
-        paymentOption !== 'CASH' &&
+        method === 'CARD' &&
         serverOrder.payment?.keyId &&
         serverOrder.razorpayOrderId
       ) {
@@ -260,56 +247,17 @@ export function CheckoutForm() {
           paymentOutcome = await openRazorpayCheckout({
             order: serverOrder,
             keyId: serverOrder.payment.keyId,
-            preferredMethod: paymentOption === 'UPI' ? 'upi' : 'card',
+            razorpayOrderId: serverOrder.razorpayOrderId,
+            preferredMethod: 'card',
           });
+        }
+        if (paymentOutcome === 'paid') {
+          finishPaidOrder(serverOrder);
+          return;
         }
       }
 
-      // Generate WhatsApp message directly from the server-created order
-      const { url, message, isTruncated } = buildWhatsAppUrlFromOrder(serverOrder);
-
-      // Save verified server order to session storage for the confirmation page
-      if (typeof window !== 'undefined') {
-        sessionStorage.setItem(
-          'latestOrder',
-          JSON.stringify({
-            serverOrder,
-            fullMessage: message,
-            isTruncated,
-            whatsappUrl: url,
-          })
-        );
-      }
-
-      // Clear the client cart now that database order is created
-      clearCart();
-
-      if (paymentOutcome === 'paid') {
-        toast.success('Payment received! Order confirmed. Connecting to WhatsApp...', {
-          duration: 2500,
-        });
-      } else if (paymentOutcome === 'failed') {
-        toast.error('Order placed, but payment failed. You can pay at the counter.', {
-          duration: 4000,
-        });
-      } else if (paymentOutcome === 'unpaid' && serverOrder.payment?.keyId) {
-        toast('Order placed. Payment pending — you can pay at the counter.', {
-          duration: 3000,
-        });
-      } else {
-        toast.success('Order placed successfully! Connecting to WhatsApp...', {
-          duration: 2500,
-        });
-      }
-
-      // Attempt to open WhatsApp directly
-      try {
-        window.open(url, '_blank');
-      } catch {
-        // Ignored if blocked by browser popup blocker
-      }
-
-      router.push('/success');
+      finishUnpaidOrder(serverOrder, paymentOutcome);
     } catch (error) {
       console.error('Order creation failed:', error);
       toast.error(
@@ -320,6 +268,19 @@ export function CheckoutForm() {
       setIsSubmitting(false);
     }
   };
+
+  const handleUpiPaid = React.useCallback(
+    (paidOrder: ServerOrder) => {
+      finishPaidOrder(paidOrder);
+    },
+    [finishPaidOrder]
+  );
+
+  const handlePayAtCounter = React.useCallback(() => {
+    if (!createdOrder) return;
+    setUpiActive(false);
+    finishUnpaidOrder(createdOrder, 'unpaid');
+  }, [createdOrder, finishUnpaidOrder]);
 
   const presetNotes = [
     'Extra Sugar',
@@ -339,6 +300,16 @@ export function CheckoutForm() {
   };
 
   return (
+    <>
+      {upiActive && createdOrder ? (
+        <UpiPaymentPanel
+          key={createdOrder.id}
+          order={createdOrder}
+          onChangeMethod={() => setUpiActive(false)}
+          onPayAtCounter={handlePayAtCounter}
+          onPaid={handleUpiPaid}
+        />
+      ) : (
     <form onSubmit={handleSubmit} className="space-y-6">
       <div className="rounded-2xl border border-border bg-card p-5 sm:p-6 space-y-4 shadow-sm">
         <h3 className="font-heading font-bold text-base text-foreground border-b border-border/40 pb-2.5 flex items-center gap-2">
@@ -498,6 +469,11 @@ export function CheckoutForm() {
             <Loader2 className="w-5 h-5 animate-spin" />
             <span>Creating Order in System...</span>
           </>
+        ) : paymentOption === 'UPI' ? (
+          <>
+            <Send className="w-5 h-5" />
+            <span>Pay ₹{cartTotal} with UPI</span>
+          </>
         ) : (
           <>
             <Send className="w-5 h-5" />
@@ -506,5 +482,7 @@ export function CheckoutForm() {
         )}
       </Button>
     </form>
+      )}
+    </>
   );
 }

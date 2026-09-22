@@ -115,6 +115,36 @@ curl -X POST http://localhost:3000/api/orders \
 
 > Prices and taxes are always calculated server-side from the database. Do not send a client-provided total.
 
+### Embedded UPI QR payments
+
+Choosing UPI at checkout keeps payment inside the page: the server creates a
+single-use Razorpay QR (`POST /v1/payments/qr_codes`, `type: upi_qr`), renders
+it with the Nth Cup mark plus a countdown, and polls
+`GET /api/orders/[id]/payment-status` until it flips to PAID. Mobile shows
+one-tap GPay / PhonePe / Paytm / CRED intent buttons. CARD keeps the Razorpay
+popup; CASH is unchanged. If QR creation fails, checkout degrades to the popup
+and then to "pay at counter" — the order is never blocked.
+
+Razorpay setup (both are **on-demand features** — ask Razorpay Support to
+enable them, otherwise the app falls back automatically):
+
+- QR Codes API + the `qr_image_content` response field (provides the
+  `upi://pay?...` string the QR and intent buttons are built from).
+- Webhook: subscribe URL `https://<your-domain>/api/webhooks/razorpay` to
+  events `qr_code.credited`, `qr_code.closed` and `payment.captured`, and set
+  `RAZORPAY_WEBHOOK_SECRET` to the webhook secret. The status poller also
+  reconciles directly with Razorpay, so payments land even if a webhook is
+  missed. `close_by` is sent ≥ 15 min ahead while the visible countdown
+  (`UPI_QR_TTL_SECONDS`, default 300s) is enforced separately — the server
+  closes the QR at visible expiry so late scans cannot succeed.
+
+Local testing without real money (`NODE_ENV=development` +
+`ENABLE_DEV_PAYMENT_SIMULATOR=true`): unconfigured/failed QR creation returns
+a clearly-fake non-payable `upi://pay?...` URI (badged "DEV MOCK" in the UI),
+and `POST /api/dev/simulate-upi-payment` (`{ "orderId" }`) marks the order
+PAID through the same shared path as webhooks. Both are unreachable in
+production. Verify intent-link builders with `npx tsx scripts/test-upi.ts`.
+
 ## Project Structure
 
 ```
@@ -167,6 +197,9 @@ Copy `.env.example` to `.env` and configure:
 | `NEXTAUTH_URL` | App base URL (`http://localhost:3000` for dev) |
 | `RAZORPAY_KEY_ID` | Razorpay API key (test or live) |
 | `RAZORPAY_KEY_SECRET` | Razorpay API secret |
+| `RAZORPAY_WEBHOOK_SECRET` | Webhook signature secret (Dashboard → Settings → Webhooks). Required for UPI QR confirmation |
+| `UPI_QR_TTL_SECONDS` | Visible UPI QR countdown in seconds (default `300`) |
+| `ENABLE_DEV_PAYMENT_SIMULATOR` | Dev-only mock QR + payment simulator (`true` only for local dev) |
 | `BLOB_READ_WRITE_TOKEN` | Vercel Blob token (required for admin image uploads) |
 
 ## Available Scripts

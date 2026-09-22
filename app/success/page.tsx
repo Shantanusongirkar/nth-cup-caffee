@@ -149,6 +149,15 @@ export default function SuccessPage() {
               <p className="text-emerald-600 dark:text-emerald-400 font-semibold">
                 Status: {order.status}
               </p>
+              <p
+                className={
+                  order.paymentStatus === 'PAID'
+                    ? 'text-emerald-600 dark:text-emerald-400 font-semibold'
+                    : 'text-amber-600 dark:text-amber-400 font-semibold'
+                }
+              >
+                Payment: {order.paymentStatus === 'PAID' ? 'Paid via UPI' : 'Pay at counter'}
+              </p>
             </div>
           </div>
 
@@ -200,7 +209,11 @@ export default function SuccessPage() {
             </div>
 
             <div className="flex justify-between items-center text-sm font-bold text-foreground pt-2 border-t border-border/30">
-              <span className="font-heading">Total Amount (Paid at counter)</span>
+              <span className="font-heading">
+                {order.paymentStatus === 'PAID'
+                  ? 'Total Amount (Paid via UPI)'
+                  : 'Total Amount (Pay at counter)'}
+              </span>
               <span className="font-extrabold text-lg text-primary">
                 {formatPaiseToRupees(order.totalInPaise)}
               </span>

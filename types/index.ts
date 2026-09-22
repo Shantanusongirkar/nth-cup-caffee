@@ -68,8 +68,11 @@ export interface ServerOrder {
   customer: ServerCustomer;
   status: OrderStatus;
   paymentStatus?: OrderPaymentStatus;
+  paymentMethod?: PaymentMethod;
   razorpayOrderId?: string | null;
   razorpayPaymentId?: string | null;
+  razorpayQrId?: string | null;
+  qrExpiresAt?: string | Date | null;
   payment?: { keyId?: string | null; orderId?: string | null };
   tableNumber?: string | null;
   notes?: string | null;

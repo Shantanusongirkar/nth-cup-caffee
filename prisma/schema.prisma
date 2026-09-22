@@ -80,6 +80,9 @@ model Order {
   paymentMethod     PaymentMethod      @default(CASH)   
   razorpayOrderId   String?
   razorpayPaymentId String?
+  razorpayQrId      String?   @unique
+  qrExpiresAt       DateTime?
+  qrIssueCount      Int       @default(0)
   tableNumber       String?
   notes             String?
   subtotalInPaise   Int

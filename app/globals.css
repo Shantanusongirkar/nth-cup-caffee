@@ -194,6 +194,69 @@
   50% { transform: translateY(-6px); }
 }
 
+/* UPI paid checkmark: circle + tick drawn via stroke-dashoffset */
+@keyframes upi-draw-circle {
+  from { stroke-dashoffset: 166; }
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes upi-draw-check {
+  from { stroke-dashoffset: 48; }
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes upi-pop {
+  0% { transform: scale(0.6); opacity: 0; }
+  60% { transform: scale(1.06); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.upi-check-circle {
+  stroke-dasharray: 166;
+  stroke-dashoffset: 166;
+  animation: upi-draw-circle 0.6s ease-out forwards;
+}
+
+.upi-check-mark {
+  stroke-dasharray: 48;
+  stroke-dashoffset: 48;
+  animation: upi-draw-check 0.35s ease-out 0.5s forwards;
+}
+
+.upi-pop {
+  animation: upi-pop 0.45s ease-out forwards;
+}
+
+/* Warm golden shimmer for the QR border */
+@keyframes upi-shimmer-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(200%); }
+}
+
+.upi-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(105deg, transparent 40%, rgba(255, 255, 255, 0.35) 50%, transparent 60%);
+  transform: translateX(-100%);
+  animation: upi-shimmer-slide 2.8s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .upi-check-circle,
+  .upi-check-mark,
+  .upi-pop,
+  .upi-shimmer::after {
+    animation: none;
+  }
+  .upi-check-circle,
+  .upi-check-mark {
+    stroke-dashoffset: 0;
+  }
+}
+
 .animate-fade-in-up {
   animation: fade-in-up 0.5s ease-out forwards;
 }

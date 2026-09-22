@@ -139,6 +139,7 @@ export async function POST(request: Request) {
           cafeId: cafe.id,
           customerId: customer.id,
           status: "PENDING",
+          paymentMethod: parsed.data.paymentMethod,
           tableNumber: parsed.data.tableNumber,
           notes: parsed.data.notes,
           subtotalInPaise,
@@ -163,15 +164,22 @@ export async function POST(request: Request) {
       return createdOrder;
     });
 
-    // Try to create a Razorpay order for online payment. This must never block
-    // or fail order creation: if it fails (or Razorpay is unconfigured) the
-    // order still exists as UNPAID and the customer can pay at the counter.
+    // Try to create a Razorpay order for CARD payments only. UPI uses the
+    // embedded QR flow (POST /api/orders/[id]/upi-qr) and CASH needs no
+    // online payment, so neither creates a Razorpay Order here. This must
+    // never block or fail order creation: if it fails (or Razorpay is
+    // unconfigured) the order still exists as UNPAID and the customer can
+    // pay at the counter.
     let payment: { keyId: string | null; orderId: string | null } = {
       keyId: null,
       orderId: null,
     };
 
-    if (isRazorpayConfigured() && order.totalInPaise > 0) {
+    if (
+      parsed.data.paymentMethod === "CARD" &&
+      isRazorpayConfigured() &&
+      order.totalInPaise > 0
+    ) {
       try {
         const receipt = formatOrderReference(order.id);
         const rzpOrder = await createRazorpayOrder({
