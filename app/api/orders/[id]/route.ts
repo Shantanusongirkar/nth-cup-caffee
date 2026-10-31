@@ -1,3 +1,10 @@
+// ============================================================================
+// PASTE INTO:  app/api/orders/[id]/route.ts       (REPLACE the whole file)
+// ----------------------------------------------------------------------------
+// WHAT CHANGED (search for "CHANGED"):
+//   When staff mark a CASH order as COMPLETED, its payment status is now set to
+//   PAID automatically. Before, completed cash orders stayed "Unpaid".
+// ============================================================================
 import { getPrisma } from "@/lib/prisma";
 import { validateUpdateOrderStatusInput } from "@/lib/order-validation";
 import { formatOrderReference } from "../route";
@@ -66,7 +73,8 @@ export async function PATCH(
     // Return 404 (not 403) so we don't leak existence of orders in other cafes.
     const existingOrder = await prisma.order.findFirst({
       where: { id, cafeId },
-      select: { id: true },
+      // CHANGED: also read paymentMethod and paymentStatus (needed below)
+      select: { id: true, paymentMethod: true, paymentStatus: true },
     });
 
     if (!existingOrder) {
@@ -76,9 +84,20 @@ export async function PATCH(
       );
     }
 
+    // CHANGED: a CASH order that is marked COMPLETED has been paid at the table,
+    // so mark it PAID too. UPI and card orders are marked paid by Razorpay, not here.
+    const shouldMarkCashPaid =
+      parsed.data.status === "COMPLETED" &&
+      existingOrder.paymentMethod === "CASH" &&
+      existingOrder.paymentStatus !== "PAID";
+
     const updatedOrder = await prisma.order.update({
       where: { id },
-      data: { status: parsed.data.status },
+      data: {
+        status: parsed.data.status,
+        // CHANGED: only adds paymentStatus when the rule above is true
+        ...(shouldMarkCashPaid ? { paymentStatus: "PAID" as const } : {}),
+      },
       include: {
         customer: { select: { id: true, name: true, phone: true, email: true } },
         items: {

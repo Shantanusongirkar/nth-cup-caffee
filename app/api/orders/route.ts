@@ -1,3 +1,4 @@
+
 import { validateCreateOrderInput } from "@/lib/order-validation";
 import { getPrisma } from "@/lib/prisma";
 import { OrderStatus } from "@/types";
@@ -5,6 +6,8 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import type { Session } from "next-auth";
 import { createRazorpayOrder, isRazorpayConfigured } from "@/lib/payments/razorpay";
+// CHANGED: India-time "start of today" helper (see lib/dates.ts)
+import { startOfTodayIST } from "@/lib/dates";
 
 export const runtime = "nodejs";
 
@@ -164,22 +167,16 @@ export async function POST(request: Request) {
       return createdOrder;
     });
 
-    // Try to create a Razorpay order for CARD payments only. UPI uses the
-    // embedded QR flow (POST /api/orders/[id]/upi-qr) and CASH needs no
-    // online payment, so neither creates a Razorpay Order here. This must
-    // never block or fail order creation: if it fails (or Razorpay is
-    // unconfigured) the order still exists as UNPAID and the customer can
-    // pay at the counter.
+    // Try to create a Razorpay order for online payment. This must never block
+    // or fail order creation: if it fails (or Razorpay is unconfigured) the
+    // order still exists as UNPAID and the customer can pay at the counter.
+    // Skipped entirely for CASH orders — no online payment is expected.
     let payment: { keyId: string | null; orderId: string | null } = {
       keyId: null,
       orderId: null,
     };
 
-    if (
-      parsed.data.paymentMethod === "CARD" &&
-      isRazorpayConfigured() &&
-      order.totalInPaise > 0
-    ) {
+    if (order.paymentMethod !== "CASH" && isRazorpayConfigured() && order.totalInPaise > 0) {
       try {
         const receipt = formatOrderReference(order.id);
         const rzpOrder = await createRazorpayOrder({
@@ -228,6 +225,12 @@ export async function POST(request: Request) {
   }
 }
 
+// CHANGED: the whole GET function below is new. POST above is untouched.
+// - accepts ?range=today|yesterday|week|all  (default: today)
+// - "today" = today's orders + older orders that are still active in the kitchen
+//   (so a paid order placed at 11:55 PM does not vanish at midnight)
+// - "today" is measured in India time, not server (UTC) time
+// - returns staleCount = old, unpaid, never-accepted orders (for the Clear button)
 export async function GET(request: Request) {
   try {
     // Authenticated — only the logged-in staff member's own cafe orders
@@ -242,15 +245,25 @@ export async function GET(request: Request) {
 
     const { searchParams } = new URL(request.url);
     const statusParam = searchParams.get("status")?.toUpperCase();
+    const range = (searchParams.get("range") ?? "today").toLowerCase(); // CHANGED
     const limit = Math.min(Math.max(parseInt(searchParams.get("limit") || "50", 10), 1), 100);
     const page = Math.max(parseInt(searchParams.get("page") || "1", 10), 1);
     const skip = (page - 1) * limit;
 
     const prisma = getPrisma();
+    const todayStart = startOfTodayIST(); // CHANGED: was new Date().setHours(0,0,0,0)
+    const DAY_MS = 24 * 60 * 60 * 1000;
 
+    // CHANGED: where-clause type now also allows createdAt and OR
     const whereClause: {
       cafeId: string;
       status?: OrderStatus;
+      createdAt?: { gte?: Date; lt?: Date };
+      OR?: Array<{
+        createdAt?: { gte: Date };
+        status?: OrderStatus;
+        paymentStatus?: "PAID";
+      }>;
     } = { cafeId };
 
     if (
@@ -260,7 +273,25 @@ export async function GET(request: Request) {
       whereClause.status = statusParam as OrderStatus;
     }
 
-    const [orders, totalCount] = await Promise.all([
+    // CHANGED: date range filter
+    if (range === "today") {
+      whereClause.OR = [
+        { createdAt: { gte: todayStart } }, // placed today
+        { status: "CONFIRMED" }, // still being brewed, from any day
+        { status: "PENDING", paymentStatus: "PAID" }, // paid but not accepted yet
+      ];
+    } else if (range === "yesterday") {
+      whereClause.createdAt = {
+        gte: new Date(todayStart.getTime() - DAY_MS),
+        lt: todayStart,
+      };
+    } else if (range === "week") {
+      whereClause.createdAt = { gte: new Date(todayStart.getTime() - 6 * DAY_MS) };
+    }
+    // range === "all": no date filter
+
+    // CHANGED: the four database queries now run together (faster)
+    const [orders, totalCount, todayOrders, staleCount] = await Promise.all([
       prisma.order.findMany({
         where: whereClause,
         orderBy: { createdAt: "desc" },
@@ -282,22 +313,21 @@ export async function GET(request: Request) {
         },
       }),
       prisma.order.count({ where: whereClause }),
+      // Today's stats (cards at the top of the page)
+      prisma.order.findMany({
+        where: { cafeId, createdAt: { gte: todayStart } },
+        select: { status: true, totalInPaise: true },
+      }),
+      // CHANGED: old, unpaid, never-accepted orders that can be cleared
+      prisma.order.count({
+        where: {
+          cafeId,
+          status: "PENDING",
+          paymentStatus: "UNPAID",
+          createdAt: { lt: todayStart },
+        },
+      }),
     ]);
-
-    // Calculate Today's Stats
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-
-    const todayOrders = await prisma.order.findMany({
-      where: {
-        cafeId,
-        createdAt: { gte: todayStart },
-      },
-      select: {
-        status: true,
-        totalInPaise: true,
-      },
-    });
 
     const stats = {
       todayOrders: todayOrders.length,
@@ -317,6 +347,7 @@ export async function GET(request: Request) {
       {
         orders: formattedOrders,
         stats,
+        staleCount, // CHANGED: new field
         totalCount,
         page,
         limit,

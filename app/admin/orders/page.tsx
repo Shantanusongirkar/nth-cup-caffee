@@ -1,5 +1,12 @@
 'use client';
 
+// ============================================================================
+// PASTE INTO:  app/admin/orders/page.tsx       (REPLACE the whole file)
+// WHAT CHANGED: 7 small edits, each marked "CHANGED (n/7)". Everything else
+// is exactly your existing file. Search for "CHANGED" to see them all.
+// You can delete this banner comment after pasting.
+// ============================================================================
+
 import * as React from 'react';
 import Link from 'next/link';
 import { ServerOrder, OrderStatus, AdminOrderStats, OrderPaymentStatus } from '@/types';
@@ -144,6 +151,9 @@ function playNotificationChime() {
   }
 }
 
+// CHANGED (1/7): the date filter choices
+type DateRange = 'TODAY' | 'YESTERDAY' | 'WEEK' | 'ALL';
+
 export default function AdminOrdersPage() {
   const [orders, setOrders] = React.useState<ServerOrder[]>([]);
   const [stats, setStats] = React.useState<AdminOrderStats>({
@@ -163,6 +173,10 @@ export default function AdminOrdersPage() {
   const [soundEnabled, setSoundEnabled] = React.useState(true);
   const [lastRefreshedAt, setLastRefreshedAt] = React.useState<Date | null>(null);
   const [updatingOrderId, setUpdatingOrderId] = React.useState<string | null>(null);
+  // CHANGED (2/7): date filter + cleanup button state
+  const [range, setRange] = React.useState<DateRange>('TODAY');
+  const [staleCount, setStaleCount] = React.useState(0);
+  const [isClearing, setIsClearing] = React.useState(false);
 
   // Track known order IDs for sound notification on new pending order arrival
   const knownOrderIdsRef = React.useRef<Set<string>>(new Set());
@@ -173,7 +187,9 @@ export default function AdminOrdersPage() {
     }
 
     try {
-      const response = await fetch('/api/orders?cafeSlug=nth-cup-demo', {
+      // CHANGED (3/7): sends the selected range; the hardcoded cafe slug is gone
+      // (the server already knows the cafe from the login session)
+      const response = await fetch(`/api/orders?range=${range}`, {
         headers: { Accept: 'application/json' },
         cache: 'no-store',
       });
@@ -202,6 +218,7 @@ export default function AdminOrdersPage() {
       knownOrderIdsRef.current = new Set(incomingOrders.map((o) => o.id));
 
       setOrders(incomingOrders);
+      setStaleCount(data.staleCount ?? 0); // CHANGED (4/7)
       if (data.stats) {
         setStats(data.stats);
       }
@@ -218,7 +235,7 @@ export default function AdminOrdersPage() {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, [soundEnabled]);
+  }, [soundEnabled, range]); // CHANGED (5/7): refetch when the range changes
 
   // Initial load
   React.useEffect(() => {
@@ -271,6 +288,36 @@ export default function AdminOrdersPage() {
       toast.error(err instanceof Error ? err.message : 'Failed to update status.');
     } finally {
       setUpdatingOrderId(null);
+    }
+  };
+
+  // CHANGED (6/7): two new functions
+  const handleRangeChange = (next: DateRange) => {
+    if (next === range) return;
+    knownOrderIdsRef.current = new Set(); // stops a false "new order" chime
+    setIsLoading(true);
+    setRange(next);
+  };
+
+  const handleClearOld = async () => {
+    if (
+      !window.confirm(
+        `Cancel ${staleCount} unpaid pending order(s) from before today? Paid orders are not touched.`
+      )
+    ) {
+      return;
+    }
+    setIsClearing(true);
+    try {
+      const res = await fetch('/api/admin/orders/cleanup', { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.message || 'Failed to clear old orders.');
+      toast.success(`${data.cancelled} old order(s) cancelled`);
+      fetchOrders(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to clear old orders.');
+    } finally {
+      setIsClearing(false);
     }
   };
 
@@ -529,6 +576,45 @@ export default function AdminOrdersPage() {
 
       {/* ── Filters, Search & View Controls ── */}
       <div className="space-y-3 pt-1">
+        {/* CHANGED (7/7): date range buttons + "Clear old unpaid" button */}
+        <div className="flex flex-wrap items-center gap-2.5">
+          <div className="flex items-center bg-muted/50 p-1 rounded-xl border border-border/60">
+            {(
+              [
+                { id: 'TODAY', label: 'Today' },
+                { id: 'YESTERDAY', label: 'Yesterday' },
+                { id: 'WEEK', label: 'Last 7 days' },
+                { id: 'ALL', label: 'All time' },
+              ] as const
+            ).map((r) => (
+              <button
+                key={r.id}
+                onClick={() => handleRangeChange(r.id)}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+                  range === r.id
+                    ? 'bg-background text-foreground shadow-xs'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {r.label}
+              </button>
+            ))}
+          </div>
+
+          {staleCount > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleClearOld}
+              disabled={isClearing}
+              className="h-9 rounded-xl text-xs font-semibold gap-1.5 border-amber-500/40 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10"
+            >
+              <Ban className="w-3.5 h-3.5" />
+              <span>{isClearing ? 'Clearing...' : `Clear ${staleCount} old unpaid`}</span>
+            </Button>
+          )}
+        </div>
+
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
           {/* Status Tabs */}
           <div className="flex flex-wrap gap-1.5 bg-muted/50 p-1.5 rounded-2xl border border-border/60">
