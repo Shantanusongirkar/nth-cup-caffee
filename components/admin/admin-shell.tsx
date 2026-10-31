@@ -10,6 +10,7 @@ import {
   Coffee,
   Users,
   TrendingUp,
+  Settings,
   Menu,
   X,
   LogOut,
@@ -31,6 +32,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/admin/menu', label: 'Menu', icon: Coffee },
   { href: '/admin/customers', label: 'Customers', icon: Users },
   { href: '/admin/analytics', label: 'Analytics', icon: TrendingUp },
+  { href: '/admin/settings', label: 'Settings', icon: Settings },
 ];
 
 interface AdminShellProps {

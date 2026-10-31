@@ -25,6 +25,8 @@ interface OrderApiResponse {
   details?: string[];
 }
 
+const CAFE_SLUG = 'nth-cup-demo';
+
 export function CheckoutForm() {
   const router = useRouter();
   const items = useCartStore((state) => state.items);
@@ -71,7 +73,7 @@ export function CheckoutForm() {
     method: 'UPI' | 'CARD' | 'CASH'
   ): Promise<ServerOrder> {
     const payload = {
-      cafeSlug: 'nth-cup-demo',
+      cafeSlug: CAFE_SLUG,
       customer: {
         name: customerName.trim(),
         phone: phoneNumber.trim() || undefined,
@@ -132,54 +134,67 @@ export function CheckoutForm() {
     return result.order;
   }
 
-  /** Shared finish for UNPAID orders (cash / pay-at-counter): WhatsApp + success. */
+  /** Shared finish for UNPAID orders (cash / pay-at-counter): WhatsApp + success.
+   *  Whether WhatsApp actually opens depends on the cafe's
+   *  `orderNotificationChannel` setting (Staff Portal Only / WhatsApp / Both). */
   const finishUnpaidOrder = React.useCallback(
-    (serverOrder: ServerOrder, paymentOutcome: PaymentOutcome) => {
-    // Generate WhatsApp message directly from the server-created order
-    const { url, message, isTruncated } = buildWhatsAppUrlFromOrder(serverOrder);
+    async (serverOrder: ServerOrder, paymentOutcome: PaymentOutcome) => {
+      // Generate WhatsApp message directly from the server-created order
+      const { url, message, isTruncated } = buildWhatsAppUrlFromOrder(serverOrder);
 
-    // Save verified server order to session storage for the confirmation page
-    if (typeof window !== 'undefined') {
-      sessionStorage.setItem(
-        'latestOrder',
-        JSON.stringify({
-          serverOrder,
-          fullMessage: message,
-          isTruncated,
-          whatsappUrl: url,
-        })
-      );
-    }
+      // Save verified server order to session storage for the confirmation page
+      if (typeof window !== 'undefined') {
+        sessionStorage.setItem(
+          'latestOrder',
+          JSON.stringify({
+            serverOrder,
+            fullMessage: message,
+            isTruncated,
+            whatsappUrl: url,
+          })
+        );
+      }
 
-    // Clear the client cart now that database order is created
-    clearCart();
+      // Clear the client cart now that database order is created
+      clearCart();
 
-    if (paymentOutcome === 'paid') {
-      toast.success('Payment received! Order confirmed. Connecting to WhatsApp...', {
-        duration: 2500,
-      });
-    } else if (paymentOutcome === 'failed') {
-      toast.error('Order placed, but payment failed. You can pay at the counter.', {
-        duration: 4000,
-      });
-    } else if (paymentOutcome === 'unpaid' && serverOrder.payment?.keyId) {
-      toast('Order placed. Payment pending — you can pay at the counter.', {
-        duration: 3000,
-      });
-    } else {
-      toast.success('Order placed successfully! Connecting to WhatsApp...', {
-        duration: 2500,
-      });
-    }
+      if (paymentOutcome === 'paid') {
+        toast.success('Payment received! Order confirmed. Connecting to WhatsApp...', {
+          duration: 2500,
+        });
+      } else if (paymentOutcome === 'failed') {
+        toast.error('Order placed, but payment failed. You can pay at the counter.', {
+          duration: 4000,
+        });
+      } else if (paymentOutcome === 'unpaid' && serverOrder.payment?.keyId) {
+        toast('Order placed. Payment pending — you can pay at the counter.', {
+          duration: 3000,
+        });
+      } else {
+        toast.success('Order placed successfully! Connecting to WhatsApp...', {
+          duration: 2500,
+        });
+      }
 
-    // Attempt to open WhatsApp directly
-    try {
-      window.open(url, '_blank');
-    } catch {
-      // Ignored if blocked by browser popup blocker
-    }
+      // Only open WhatsApp if the cafe's setting allows it.
+      try {
+        const settingsRes = await fetch(`/api/cafe-settings?cafeSlug=${CAFE_SLUG}`);
+        const settingsData = await settingsRes.json().catch(() => ({}));
+        const channel = settingsData.orderNotificationChannel ?? 'BOTH';
 
-    router.push('/success');
+        if (channel !== 'STAFF_PORTAL') {
+          window.open(url, '_blank');
+        }
+      } catch {
+        // If the settings check fails, default to opening WhatsApp — safer fallback.
+        try {
+          window.open(url, '_blank');
+        } catch {
+          // Ignored if blocked by browser popup blocker
+        }
+      }
+
+      router.push('/success');
     },
     [clearCart, router]
   );
@@ -257,7 +272,7 @@ export function CheckoutForm() {
         }
       }
 
-      finishUnpaidOrder(serverOrder, paymentOutcome);
+      await finishUnpaidOrder(serverOrder, paymentOutcome);
     } catch (error) {
       console.error('Order creation failed:', error);
       toast.error(
@@ -276,10 +291,10 @@ export function CheckoutForm() {
     [finishPaidOrder]
   );
 
-  const handlePayAtCounter = React.useCallback(() => {
+  const handlePayAtCounter = React.useCallback(async () => {
     if (!createdOrder) return;
     setUpiActive(false);
-    finishUnpaidOrder(createdOrder, 'unpaid');
+    await finishUnpaidOrder(createdOrder, 'unpaid');
   }, [createdOrder, finishUnpaidOrder]);
 
   const presetNotes = [
@@ -310,178 +325,178 @@ export function CheckoutForm() {
           onPaid={handleUpiPaid}
         />
       ) : (
-    <form onSubmit={handleSubmit} className="space-y-6">
-      <div className="rounded-2xl border border-border bg-card p-5 sm:p-6 space-y-4 shadow-sm">
-        <h3 className="font-heading font-bold text-base text-foreground border-b border-border/40 pb-2.5 flex items-center gap-2">
-          <Sparkles className="w-4 h-4 text-primary" />
-          <span>Customer & Table Details</span>
-        </h3>
+        <form onSubmit={handleSubmit} className="space-y-6">
+          <div className="rounded-2xl border border-border bg-card p-5 sm:p-6 space-y-4 shadow-sm">
+            <h3 className="font-heading font-bold text-base text-foreground border-b border-border/40 pb-2.5 flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-primary" />
+              <span>Customer & Table Details</span>
+            </h3>
 
-        {/* Customer Name */}
-        <div className="space-y-1.5">
-          <Label htmlFor="customerName" className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-            <User className="w-3.5 h-3.5 text-primary" />
-            <span>Customer Name</span> <span className="text-destructive">*</span>
-          </Label>
-          <Input
-            id="customerName"
-            type="text"
-            required
-            disabled={isSubmitting}
-            placeholder="e.g. John Doe"
-            value={customerName}
-            onChange={(e) => setCustomerName(e.target.value)}
-            className="rounded-xl border-border bg-background"
-          />
-        </div>
-
-        {/* Table Number & Phone Number grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="tableNumber" className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-              <MapPin className="w-3.5 h-3.5 text-primary" />
-              <span>Table Number</span> <span className="text-muted-foreground font-normal text-[11px]">(Optional)</span>
-            </Label>
-            <Input
-              id="tableNumber"
-              type="text"
-              disabled={isSubmitting}
-              placeholder="e.g. Table 5 / Takeaway"
-              value={tableNumber}
-              onChange={(e) => setTableNumber(e.target.value)}
-              className="rounded-xl border-border bg-background"
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="phoneNumber" className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-              <Phone className="w-3.5 h-3.5 text-primary" />
-              <span>Phone Number</span> <span className="text-muted-foreground font-normal text-[11px]">(Optional)</span>
-            </Label>
-            <Input
-              id="phoneNumber"
-              type="tel"
-              disabled={isSubmitting}
-              placeholder="e.g. +91 98765 43210"
-              value={phoneNumber}
-              onChange={(e) => setPhoneNumber(e.target.value)}
-              className="rounded-xl border-border bg-background"
-            />
-          </div>
-        </div>
-
-        {/* Email Address */}
-        <div className="space-y-1.5">
-          <Label htmlFor="email" className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-            <Mail className="w-3.5 h-3.5 text-primary" />
-            <span>Email Address</span> <span className="text-muted-foreground font-normal text-[11px]">(Optional, for e-receipt)</span>
-          </Label>
-          <Input
-            id="email"
-            type="email"
-            disabled={isSubmitting}
-            placeholder="e.g. john@example.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="rounded-xl border-border bg-background"
-          />
-        </div>
-
-        {/* Special Instructions */}
-        <div className="space-y-1.5">
-          <Label htmlFor="specialInstructions" className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-            <FileText className="w-3.5 h-3.5 text-primary" />
-            <span>Special Instructions / Dietary Notes</span> <span className="text-muted-foreground font-normal text-[11px]">(Optional)</span>
-          </Label>
-          <Textarea
-            id="specialInstructions"
-            rows={3}
-            disabled={isSubmitting}
-            placeholder="Add any customization notes, ice preference, or sugar level here..."
-            value={specialInstructions}
-            onChange={(e) => setSpecialInstructions(e.target.value)}
-            className="rounded-xl border-border bg-background resize-none text-xs"
-          />
-
-          {/* Quick presets */}
-          <div className="flex flex-wrap gap-1.5 pt-1">
-            <span className="text-[11px] text-muted-foreground self-center mr-1">Quick add:</span>
-            {presetNotes.map((note) => (
-              <button
-                key={note}
-                type="button"
+            {/* Customer Name */}
+            <div className="space-y-1.5">
+              <Label htmlFor="customerName" className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                <User className="w-3.5 h-3.5 text-primary" />
+                <span>Customer Name</span> <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="customerName"
+                type="text"
+                required
                 disabled={isSubmitting}
-                onClick={() => addPresetNote(note)}
-                className="text-[11px] bg-muted hover:bg-primary/10 hover:text-primary text-muted-foreground px-2.5 py-0.5 rounded-full border border-border/50 transition-colors disabled:opacity-50"
-              >
-                + {note}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Payment Method Selector */}
-      <div className="rounded-2xl border border-border bg-card p-5 sm:p-6 space-y-3 shadow-sm">
-        <h3 className="font-heading font-bold text-base text-foreground border-b border-border/40 pb-2.5">
-          Choose Payment Method
-        </h3>
-        <div className="space-y-2">
-          {(
-            [
-              { id: 'UPI', label: 'UPI (Google Pay, PhonePe, Paytm)' },
-              { id: 'DEBIT_CARD', label: 'Debit Card' },
-              { id: 'CREDIT_CARD', label: 'Credit Card' },
-              { id: 'CASH', label: 'Cash on Table' },
-            ] as const
-          ).map((option) => (
-            <label
-              key={option.id}
-              className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-colors ${
-                paymentOption === option.id
-                  ? 'border-primary bg-primary/5'
-                  : 'border-border/50 hover:bg-muted/40'
-              }`}
-            >
-              <input
-                type="radio"
-                name="paymentOption"
-                value={option.id}
-                checked={paymentOption === option.id}
-                onChange={() => setPaymentOption(option.id)}
-                disabled={isSubmitting}
-                className="accent-primary w-4 h-4"
+                placeholder="e.g. John Doe"
+                value={customerName}
+                onChange={(e) => setCustomerName(e.target.value)}
+                className="rounded-xl border-border bg-background"
               />
-              <span className="text-sm font-medium text-foreground">{option.label}</span>
-            </label>
-          ))}
-        </div>
-      </div>
+            </div>
 
-      {/* Place Order Button */}
-      <Button
-        type="submit"
-        disabled={!isValid || isSubmitting}
-        className="w-full py-6 rounded-full text-base font-bold gap-2 bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-600/20 transition-all active:scale-[0.99] disabled:opacity-50"
-      >
-        {isSubmitting ? (
-          <>
-            <Loader2 className="w-5 h-5 animate-spin" />
-            <span>Creating Order in System...</span>
-          </>
-        ) : paymentOption === 'UPI' ? (
-          <>
-            <Send className="w-5 h-5" />
-            <span>Pay ₹{cartTotal} with UPI</span>
-          </>
-        ) : (
-          <>
-            <Send className="w-5 h-5" />
-            <span>Confirm & Send via WhatsApp</span>
-          </>
-        )}
-      </Button>
-    </form>
+            {/* Table Number & Phone Number grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="tableNumber" className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                  <MapPin className="w-3.5 h-3.5 text-primary" />
+                  <span>Table Number</span> <span className="text-muted-foreground font-normal text-[11px]">(Optional)</span>
+                </Label>
+                <Input
+                  id="tableNumber"
+                  type="text"
+                  disabled={isSubmitting}
+                  placeholder="e.g. Table 5 / Takeaway"
+                  value={tableNumber}
+                  onChange={(e) => setTableNumber(e.target.value)}
+                  className="rounded-xl border-border bg-background"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="phoneNumber" className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                  <Phone className="w-3.5 h-3.5 text-primary" />
+                  <span>Phone Number</span> <span className="text-muted-foreground font-normal text-[11px]">(Optional)</span>
+                </Label>
+                <Input
+                  id="phoneNumber"
+                  type="tel"
+                  disabled={isSubmitting}
+                  placeholder="e.g. +91 98765 43210"
+                  value={phoneNumber}
+                  onChange={(e) => setPhoneNumber(e.target.value)}
+                  className="rounded-xl border-border bg-background"
+                />
+              </div>
+            </div>
+
+            {/* Email Address */}
+            <div className="space-y-1.5">
+              <Label htmlFor="email" className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                <Mail className="w-3.5 h-3.5 text-primary" />
+                <span>Email Address</span> <span className="text-muted-foreground font-normal text-[11px]">(Optional, for e-receipt)</span>
+              </Label>
+              <Input
+                id="email"
+                type="email"
+                disabled={isSubmitting}
+                placeholder="e.g. john@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="rounded-xl border-border bg-background"
+              />
+            </div>
+
+            {/* Special Instructions */}
+            <div className="space-y-1.5">
+              <Label htmlFor="specialInstructions" className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                <FileText className="w-3.5 h-3.5 text-primary" />
+                <span>Special Instructions / Dietary Notes</span> <span className="text-muted-foreground font-normal text-[11px]">(Optional)</span>
+              </Label>
+              <Textarea
+                id="specialInstructions"
+                rows={3}
+                disabled={isSubmitting}
+                placeholder="Add any customization notes, ice preference, or sugar level here..."
+                value={specialInstructions}
+                onChange={(e) => setSpecialInstructions(e.target.value)}
+                className="rounded-xl border-border bg-background resize-none text-xs"
+              />
+
+              {/* Quick presets */}
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                <span className="text-[11px] text-muted-foreground self-center mr-1">Quick add:</span>
+                {presetNotes.map((note) => (
+                  <button
+                    key={note}
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => addPresetNote(note)}
+                    className="text-[11px] bg-muted hover:bg-primary/10 hover:text-primary text-muted-foreground px-2.5 py-0.5 rounded-full border border-border/50 transition-colors disabled:opacity-50"
+                  >
+                    + {note}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Payment Method Selector */}
+          <div className="rounded-2xl border border-border bg-card p-5 sm:p-6 space-y-3 shadow-sm">
+            <h3 className="font-heading font-bold text-base text-foreground border-b border-border/40 pb-2.5">
+              Choose Payment Method
+            </h3>
+            <div className="space-y-2">
+              {(
+                [
+                  { id: 'UPI', label: 'UPI (Google Pay, PhonePe, Paytm)' },
+                  { id: 'DEBIT_CARD', label: 'Debit Card' },
+                  { id: 'CREDIT_CARD', label: 'Credit Card' },
+                  { id: 'CASH', label: 'Cash on Table' },
+                ] as const
+              ).map((option) => (
+                <label
+                  key={option.id}
+                  className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-colors ${
+                    paymentOption === option.id
+                      ? 'border-primary bg-primary/5'
+                      : 'border-border/50 hover:bg-muted/40'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="paymentOption"
+                    value={option.id}
+                    checked={paymentOption === option.id}
+                    onChange={() => setPaymentOption(option.id)}
+                    disabled={isSubmitting}
+                    className="accent-primary w-4 h-4"
+                  />
+                  <span className="text-sm font-medium text-foreground">{option.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {/* Place Order Button */}
+          <Button
+            type="submit"
+            disabled={!isValid || isSubmitting}
+            className="w-full py-6 rounded-full text-base font-bold gap-2 bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-600/20 transition-all active:scale-[0.99] disabled:opacity-50"
+          >
+            {isSubmitting ? (
+              <>
+                <Loader2 className="w-5 h-5 animate-spin" />
+                <span>Creating Order in System...</span>
+              </>
+            ) : paymentOption === 'UPI' ? (
+              <>
+                <Send className="w-5 h-5" />
+                <span>Pay ₹{cartTotal} with UPI</span>
+              </>
+            ) : (
+              <>
+                <Send className="w-5 h-5" />
+                <span>Confirm & Send via WhatsApp</span>
+              </>
+            )}
+          </Button>
+        </form>
       )}
     </>
   );

@@ -13,6 +13,7 @@ model Cafe {
   slug      String     @unique
   phone     String?
   address   String?
+  orderNotificationChannel OrderNotificationChannel @default(BOTH)
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
   customers Customer[]
@@ -156,3 +157,10 @@ enum PaymentMethod {
   CARD
   CASH
 }
+
+enum OrderNotificationChannel {
+  STAFF_PORTAL
+  WHATSAPP
+  BOTH
+}
+
