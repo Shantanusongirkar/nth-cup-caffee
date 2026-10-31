@@ -28,13 +28,17 @@ function parseVerifyBody(body: unknown): VerifyPaymentBody | null {
  *   `<razorpayOrderId>|<razorpayPaymentId>`
  * matches the signature Razorpay returned to the checkout callback.
  *
- * TODO: Add a Razorpay webhook handler (e.g. POST /api/webhooks/razorpay) to
- * catch the case where a payment succeeds on Razorpay's side but the
- * client-side verify call never completes (e.g. browser closed mid-flow, or
- * the callback handler fails). Currently the order would stay UNPAID even
- * though money was captured — the admin can reconcile manually, but a webhook
- * keyed on the payment.<id> event is the robust fix. For now this is an
- * accepted limitation.
+ * When the signature is missing entirely the request is rejected (400) with
+ * no write, and a mismatched signature is rejected (403) with no write —
+ * only a valid signature may change state (to PAID). Nothing in this route
+ * can confirm, fail, or otherwise mutate an order on an unauthenticated
+ * claim.
+ *
+ * QR-code payments are confirmed separately via the signature-verified webhook
+ * (POST /api/webhooks/razorpay) and the polling reconciler
+ * (GET /api/orders/[id]/payment-status), which cover the case where a payment
+ * succeeds on Razorpay's side but this client-side verify call never
+ * completes (e.g. browser closed mid-flow).
  */
 export async function POST(
   request: Request,
@@ -90,20 +94,16 @@ export async function POST(
       );
     }
 
-    // No signature means the checkout reported a payment failure (the
-    // `payment.failed` event). We record it so staff can follow up, but never
-    // mark PAID.
+    // Missing signature: never mutate on an unauthenticated claim. The
+    // checkout `payment.failed` path settles client-side and never calls this
+    // endpoint, so there is no legitimate caller without a signature.
     if (!parsed.razorpaySignature) {
-      await prisma.order.update({
-        where: { id },
-        data: {
-          paymentStatus: "FAILED",
-          razorpayPaymentId: parsed.razorpayPaymentId,
-        },
-      });
       return Response.json(
-        { success: false, paymentStatus: "FAILED" },
-        { status: 200 }
+        {
+          error: "VALIDATION_ERROR",
+          message: "razorpaySignature is required to verify a payment.",
+        },
+        { status: 400 }
       );
     }
 
@@ -127,17 +127,10 @@ export async function POST(
       );
     }
 
-    // Signature mismatch — the payment did not originate from Razorpay for
-    // this order. Mark FAILED so the order surfaces to staff.
-    await prisma.order.update({
-      where: { id },
-      data: {
-        paymentStatus: "FAILED",
-        razorpayPaymentId: parsed.razorpayPaymentId,
-      },
-    });
+    // Signature mismatch: the payment did not originate from Razorpay for
+    // this order. Record nothing — only a valid signature may change state.
     return Response.json(
-      { success: false, error: "INVALID_SIGNATURE", paymentStatus: "FAILED" },
+      { success: false, error: "INVALID_SIGNATURE", paymentStatus: order.paymentStatus },
       { status: 403 }
     );
   } catch (error) {

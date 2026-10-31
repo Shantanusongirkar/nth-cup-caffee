@@ -11,6 +11,12 @@ import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Sparkles, Send, Loader2, Mail, Phone, MapPin, User, FileText } from 'lucide-react';
 import { toast } from 'sonner';
+import { UpiPaymentPanel } from '@/components/upi-payment-panel';
+import {
+  loadRazorpayScript,
+  openRazorpayCheckout,
+  type PaymentOutcome,
+} from '@/lib/razorpay-checkout';
 
 interface OrderApiResponse {
   order?: ServerOrder;
@@ -19,141 +25,7 @@ interface OrderApiResponse {
   details?: string[];
 }
 
-/* ---------- Razorpay (client-side) ---------- */
-
-interface RazorpayResponse {
-  razorpay_payment_id?: string;
-  razorpay_order_id?: string;
-  razorpay_signature?: string;
-}
-
-interface RazorpayInstance {
-  open: () => void;
-  on: (event: string, handler: (response: unknown) => void) => void;
-}
-
-interface RazorpayOptions {
-  key: string;
-  amount: number;
-  currency: string;
-  name: string;
-  description?: string;
-  order_id: string;
-  prefill?: { name?: string; email?: string; contact?: string };
-  handler?: (response: RazorpayResponse) => void;
-  modal?: { ondismiss?: () => void };
-  config?: unknown;
-}
-interface RazorpayConstructor {
-  new (options: RazorpayOptions): RazorpayInstance;
-}
-
-declare global {
-  interface Window {
-    Razorpay?: RazorpayConstructor;
-  }
-}
-
-let razorpayScriptPromise: Promise<boolean> | null = null;
-
-function loadRazorpayScript(): Promise<boolean> {
-  if (typeof window === 'undefined') return Promise.resolve(false);
-  if (typeof window.Razorpay !== 'undefined') return Promise.resolve(true);
-  if (!razorpayScriptPromise) {
-    razorpayScriptPromise = new Promise((resolve) => {
-      const script = document.createElement('script');
-      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-      script.async = true;
-      script.onload = () => resolve(true);
-      script.onerror = () => resolve(false);
-      document.head.appendChild(script);
-    });
-  }
-  return razorpayScriptPromise;
-}
-
-type PaymentOutcome = 'paid' | 'failed' | 'unpaid';
-
-function openRazorpayCheckout(opts: {
-  order: ServerOrder;
-  keyId: string;
-  preferredMethod: 'upi' | 'card';
-}) {
-  return new Promise<PaymentOutcome>((resolve) => {
-    const Razorpay = window.Razorpay;
-    if (!Razorpay || !opts.order.razorpayOrderId) {
-      resolve('unpaid');
-      return;
-    }
-
-    let settled = false;
-    const settle = (outcome: PaymentOutcome) => {
-      if (!settled) {
-        settled = true;
-        resolve(outcome);
-      }
-    };
-
-    const handlePaymentResponse = async (response: RazorpayResponse) => {
-      // Only the server can confirm a payment, via signature verification.
-      if (!response.razorpay_payment_id) {
-        settle('failed');
-        return;
-      }
-
-      try {
-        const res = await fetch(`/api/orders/${opts.order.id}/verify-payment`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify({
-            razorpayPaymentId: response.razorpay_payment_id,
-            razorpaySignature: response.razorpay_signature,
-          }),
-        });
-        const data = (await res.json().catch(() => ({}))) as {
-          success?: boolean;
-          paymentStatus?: string;
-        };
-        settle(res.ok && data.success === true && data.paymentStatus === 'PAID' ? 'paid' : 'failed');
-      } catch {
-        settle('failed');
-      }
-    };
-
-    const rzp = new Razorpay({
-      key: opts.keyId,
-      amount: opts.order.totalInPaise,
-      currency: 'INR',
-      name: 'Nth Cup Caffee',
-      description: `Order ${opts.order.orderReference}`,
-      order_id: opts.order.razorpayOrderId,
-      prefill: {
-        name: opts.order.customer.name,
-        email: opts.order.customer.email ?? undefined,
-        contact: opts.order.customer.phone ?? undefined,
-      },
-      config: {
-        display: {
-          blocks: {
-            preferred: {
-              name: 'Recommended',
-              instruments: [{ method: opts.preferredMethod }],
-            },
-          },
-          sequence: ['block.preferred'],
-          preferences: { show_default_blocks: true },
-        },
-      },
-      handler: handlePaymentResponse,
-      modal: {
-        ondismiss: () => settle('unpaid'),
-      },
-    } as RazorpayOptions);
-
-    rzp.on('payment.failed', () => settle('failed'));
-    rzp.open();
-  });
-}
+const CAFE_SLUG = 'nth-cup-demo';
 
 export function CheckoutForm() {
   const router = useRouter();
@@ -177,14 +49,31 @@ export function CheckoutForm() {
     return option;
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!isValid || isSubmitting) return;
+  // Embedded UPI flow: the created order is kept in state and reused across
+  // QR regeneration and "change method" trips, so going back and forth on
+  // this page never creates duplicate orders. The cart is NOT cleared until
+  // payment is confirmed or the customer chooses "pay at counter".
+  const [createdOrder, setCreatedOrder] = React.useState<ServerOrder | null>(null);
+  const [upiActive, setUpiActive] = React.useState(false);
+  const cartTotal = useCartStore((state) => state.getTotal)();
 
-    setIsSubmitting(true);
+  /** An existing order can be reused when it matches the chosen method (and
+   *  already has a Razorpay Order for CARD popups). */
+  function reusableOrderFor(
+    order: ServerOrder | null,
+    method: 'UPI' | 'CARD' | 'CASH'
+  ): ServerOrder | null {
+    if (!order) return null;
+    if ((order.paymentMethod ?? 'CASH') !== method) return null;
+    if (method === 'CARD' && !order.razorpayOrderId) return null;
+    return order;
+  }
 
+  async function createOrder(
+    method: 'UPI' | 'CARD' | 'CASH'
+  ): Promise<ServerOrder> {
     const payload = {
-      cafeSlug: 'nth-cup-demo',
+      cafeSlug: CAFE_SLUG,
       customer: {
         name: customerName.trim(),
         phone: phoneNumber.trim() || undefined,
@@ -196,75 +85,60 @@ export function CheckoutForm() {
       })),
       tableNumber: tableNumber.trim() || undefined,
       notes: specialInstructions.trim() || undefined,
-      paymentMethod: toBackendPaymentMethod(paymentOption),
+      paymentMethod: method,
     };
 
-    try {
-      // Create the order on the server. Server computes verified prices and saves to Neon.
-      const response = await fetch('/api/orders', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-        },
-        body: JSON.stringify(payload),
-      });
+    // Create the order on the server. Server computes verified prices and saves to Neon.
+    const response = await fetch('/api/orders', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
 
-      // Safely parse JSON response if available
-      let result: OrderApiResponse | null = null;
-      const contentType = response.headers.get('content-type') || '';
-      if (contentType.includes('application/json')) {
-        try {
-          result = await response.json();
-        } catch {
-          result = null;
+    // Safely parse JSON response if available
+    let result: OrderApiResponse | null = null;
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      try {
+        result = await response.json();
+      } catch {
+        result = null;
+      }
+    }
+
+    if (!response.ok) {
+      let errorMsg = 'Failed to place order. Please try again.';
+      if (result) {
+        if (result.details && Array.isArray(result.details)) {
+          errorMsg = result.details.join(', ');
+        } else if (result.message) {
+          errorMsg = result.message;
+        } else if (result.error) {
+          errorMsg = result.error;
         }
+      } else if (response.status === 405 || response.status === 307) {
+        errorMsg = 'Order creation temporarily unavailable. Please try again.';
+      } else {
+        errorMsg = `Server error (${response.status}). Please try again.`;
       }
+      throw new Error(errorMsg);
+    }
 
-      if (!response.ok) {
-        let errorMsg = 'Failed to place order. Please try again.';
-        if (result) {
-          if (result.details && Array.isArray(result.details)) {
-            errorMsg = result.details.join(', ');
-          } else if (result.message) {
-            errorMsg = result.message;
-          } else if (result.error) {
-            errorMsg = result.error;
-          }
-        } else if (response.status === 405 || response.status === 307) {
-          errorMsg = 'Order creation temporarily unavailable. Please try again.';
-        } else {
-          errorMsg = `Server error (${response.status}). Please try again.`;
-        }
-        throw new Error(errorMsg);
-      }
+    if (!result || !result.order) {
+      throw new Error('Received an unexpected response from the server. Please try again.');
+    }
 
-      if (!result || !result.order) {
-        throw new Error('Received an unexpected response from the server. Please try again.');
-      }
+    return result.order;
+  }
 
-      const serverOrder: ServerOrder = result.order;
-
-      // If the server prepared an online payment, open the Razorpay checkout
-      // modal. When present, `payment.keyId`/`orderId` guarantee Razorpay is
-      // configured. The order is ALREADY created (UNPAID) at this point, so a
-      // failed or abandoned payment never blocks the order.
-      let paymentOutcome: PaymentOutcome = 'unpaid';
-      if (
-        paymentOption !== 'CASH' &&
-        serverOrder.payment?.keyId &&
-        serverOrder.razorpayOrderId
-      ) {
-        const scriptLoaded = await loadRazorpayScript();
-        if (scriptLoaded) {
-          paymentOutcome = await openRazorpayCheckout({
-            order: serverOrder,
-            keyId: serverOrder.payment.keyId,
-            preferredMethod: paymentOption === 'UPI' ? 'upi' : 'card',
-          });
-        }
-      }
-
+  /** Shared finish for UNPAID orders (cash / pay-at-counter): WhatsApp + success.
+   *  Whether WhatsApp actually opens depends on the cafe's
+   *  `orderNotificationChannel` setting (Staff Portal Only / WhatsApp / Both). */
+  const finishUnpaidOrder = React.useCallback(
+    async (serverOrder: ServerOrder, paymentOutcome: PaymentOutcome) => {
       // Generate WhatsApp message directly from the server-created order
       const { url, message, isTruncated } = buildWhatsAppUrlFromOrder(serverOrder);
 
@@ -302,14 +176,103 @@ export function CheckoutForm() {
         });
       }
 
-      // Attempt to open WhatsApp directly
+      // Only open WhatsApp if the cafe's setting allows it.
       try {
-        window.open(url, '_blank');
+        const settingsRes = await fetch(`/api/cafe-settings?cafeSlug=${CAFE_SLUG}`);
+        const settingsData = await settingsRes.json().catch(() => ({}));
+        const channel = settingsData.orderNotificationChannel ?? 'BOTH';
+
+        if (channel !== 'STAFF_PORTAL') {
+          window.open(url, '_blank');
+        }
       } catch {
-        // Ignored if blocked by browser popup blocker
+        // If the settings check fails, default to opening WhatsApp — safer fallback.
+        try {
+          window.open(url, '_blank');
+        } catch {
+          // Ignored if blocked by browser popup blocker
+        }
       }
 
       router.push('/success');
+    },
+    [clearCart, router]
+  );
+
+  /** Finish for UPI-paid orders. No `window.open`: this runs after async waits
+   *  with no user gesture and would be popup-blocked — the success page has an
+   *  "Open WhatsApp" button instead. */
+  const finishPaidOrder = React.useCallback(
+    (serverOrder: ServerOrder) => {
+      const paidOrder: ServerOrder = { ...serverOrder, paymentStatus: 'PAID' };
+      const { url, message, isTruncated } = buildWhatsAppUrlFromOrder(paidOrder);
+
+      if (typeof window !== 'undefined') {
+        sessionStorage.setItem(
+          'latestOrder',
+          JSON.stringify({
+            serverOrder: paidOrder,
+            fullMessage: message,
+            isTruncated,
+            whatsappUrl: url,
+          })
+        );
+      }
+
+      clearCart();
+      toast.success('Payment received! Order confirmed.', { duration: 2500 });
+      router.push('/success');
+    },
+    [clearCart, router]
+  );
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!isValid || isSubmitting) return;
+
+    setIsSubmitting(true);
+
+    const method = toBackendPaymentMethod(paymentOption);
+
+    try {
+      // UPI stays embedded: create (or reuse) the order, then swap the form
+      // card for the payment panel in place. OrderSummary stays visible.
+      if (method === 'UPI') {
+        const order = reusableOrderFor(createdOrder, 'UPI') ?? (await createOrder('UPI'));
+        setCreatedOrder(order);
+        setUpiActive(true);
+        setIsSubmitting(false);
+        return;
+      }
+
+      const serverOrder = reusableOrderFor(createdOrder, method) ?? (await createOrder(method));
+      setCreatedOrder(serverOrder);
+
+      // CARD keeps the Razorpay popup flow; CASH skips it. The order is
+      // ALREADY created (UNPAID), so a failed or abandoned payment never
+      // blocks the order.
+      let paymentOutcome: PaymentOutcome = 'unpaid';
+      if (
+        method === 'CARD' &&
+        serverOrder.payment?.keyId &&
+        serverOrder.razorpayOrderId
+      ) {
+        const scriptLoaded = await loadRazorpayScript();
+        if (scriptLoaded) {
+          paymentOutcome = await openRazorpayCheckout({
+            order: serverOrder,
+            keyId: serverOrder.payment.keyId,
+            razorpayOrderId: serverOrder.razorpayOrderId,
+            preferredMethod: 'card',
+          });
+        }
+        if (paymentOutcome === 'paid') {
+          finishPaidOrder(serverOrder);
+          return;
+        }
+      }
+
+      await finishUnpaidOrder(serverOrder, paymentOutcome);
     } catch (error) {
       console.error('Order creation failed:', error);
       toast.error(
@@ -320,6 +283,19 @@ export function CheckoutForm() {
       setIsSubmitting(false);
     }
   };
+
+  const handleUpiPaid = React.useCallback(
+    (paidOrder: ServerOrder) => {
+      finishPaidOrder(paidOrder);
+    },
+    [finishPaidOrder]
+  );
+
+  const handlePayAtCounter = React.useCallback(async () => {
+    if (!createdOrder) return;
+    setUpiActive(false);
+    await finishUnpaidOrder(createdOrder, 'unpaid');
+  }, [createdOrder, finishUnpaidOrder]);
 
   const presetNotes = [
     'Extra Sugar',
@@ -339,172 +315,189 @@ export function CheckoutForm() {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
-      <div className="rounded-2xl border border-border bg-card p-5 sm:p-6 space-y-4 shadow-sm">
-        <h3 className="font-heading font-bold text-base text-foreground border-b border-border/40 pb-2.5 flex items-center gap-2">
-          <Sparkles className="w-4 h-4 text-primary" />
-          <span>Customer & Table Details</span>
-        </h3>
+    <>
+      {upiActive && createdOrder ? (
+        <UpiPaymentPanel
+          key={createdOrder.id}
+          order={createdOrder}
+          onChangeMethod={() => setUpiActive(false)}
+          onPayAtCounter={handlePayAtCounter}
+          onPaid={handleUpiPaid}
+        />
+      ) : (
+        <form onSubmit={handleSubmit} className="space-y-6">
+          <div className="rounded-2xl border border-border bg-card p-5 sm:p-6 space-y-4 shadow-sm">
+            <h3 className="font-heading font-bold text-base text-foreground border-b border-border/40 pb-2.5 flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-primary" />
+              <span>Customer & Table Details</span>
+            </h3>
 
-        {/* Customer Name */}
-        <div className="space-y-1.5">
-          <Label htmlFor="customerName" className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-            <User className="w-3.5 h-3.5 text-primary" />
-            <span>Customer Name</span> <span className="text-destructive">*</span>
-          </Label>
-          <Input
-            id="customerName"
-            type="text"
-            required
-            disabled={isSubmitting}
-            placeholder="e.g. John Doe"
-            value={customerName}
-            onChange={(e) => setCustomerName(e.target.value)}
-            className="rounded-xl border-border bg-background"
-          />
-        </div>
-
-        {/* Table Number & Phone Number grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="tableNumber" className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-              <MapPin className="w-3.5 h-3.5 text-primary" />
-              <span>Table Number</span> <span className="text-muted-foreground font-normal text-[11px]">(Optional)</span>
-            </Label>
-            <Input
-              id="tableNumber"
-              type="text"
-              disabled={isSubmitting}
-              placeholder="e.g. Table 5 / Takeaway"
-              value={tableNumber}
-              onChange={(e) => setTableNumber(e.target.value)}
-              className="rounded-xl border-border bg-background"
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="phoneNumber" className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-              <Phone className="w-3.5 h-3.5 text-primary" />
-              <span>Phone Number</span> <span className="text-muted-foreground font-normal text-[11px]">(Optional)</span>
-            </Label>
-            <Input
-              id="phoneNumber"
-              type="tel"
-              disabled={isSubmitting}
-              placeholder="e.g. +91 98765 43210"
-              value={phoneNumber}
-              onChange={(e) => setPhoneNumber(e.target.value)}
-              className="rounded-xl border-border bg-background"
-            />
-          </div>
-        </div>
-
-        {/* Email Address */}
-        <div className="space-y-1.5">
-          <Label htmlFor="email" className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-            <Mail className="w-3.5 h-3.5 text-primary" />
-            <span>Email Address</span> <span className="text-muted-foreground font-normal text-[11px]">(Optional, for e-receipt)</span>
-          </Label>
-          <Input
-            id="email"
-            type="email"
-            disabled={isSubmitting}
-            placeholder="e.g. john@example.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="rounded-xl border-border bg-background"
-          />
-        </div>
-
-        {/* Special Instructions */}
-        <div className="space-y-1.5">
-          <Label htmlFor="specialInstructions" className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-            <FileText className="w-3.5 h-3.5 text-primary" />
-            <span>Special Instructions / Dietary Notes</span> <span className="text-muted-foreground font-normal text-[11px]">(Optional)</span>
-          </Label>
-          <Textarea
-            id="specialInstructions"
-            rows={3}
-            disabled={isSubmitting}
-            placeholder="Add any customization notes, ice preference, or sugar level here..."
-            value={specialInstructions}
-            onChange={(e) => setSpecialInstructions(e.target.value)}
-            className="rounded-xl border-border bg-background resize-none text-xs"
-          />
-
-          {/* Quick presets */}
-          <div className="flex flex-wrap gap-1.5 pt-1">
-            <span className="text-[11px] text-muted-foreground self-center mr-1">Quick add:</span>
-            {presetNotes.map((note) => (
-              <button
-                key={note}
-                type="button"
+            {/* Customer Name */}
+            <div className="space-y-1.5">
+              <Label htmlFor="customerName" className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                <User className="w-3.5 h-3.5 text-primary" />
+                <span>Customer Name</span> <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="customerName"
+                type="text"
+                required
                 disabled={isSubmitting}
-                onClick={() => addPresetNote(note)}
-                className="text-[11px] bg-muted hover:bg-primary/10 hover:text-primary text-muted-foreground px-2.5 py-0.5 rounded-full border border-border/50 transition-colors disabled:opacity-50"
-              >
-                + {note}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Payment Method Selector */}
-      <div className="rounded-2xl border border-border bg-card p-5 sm:p-6 space-y-3 shadow-sm">
-        <h3 className="font-heading font-bold text-base text-foreground border-b border-border/40 pb-2.5">
-          Choose Payment Method
-        </h3>
-        <div className="space-y-2">
-          {(
-            [
-              { id: 'UPI', label: 'UPI (Google Pay, PhonePe, Paytm)' },
-              { id: 'DEBIT_CARD', label: 'Debit Card' },
-              { id: 'CREDIT_CARD', label: 'Credit Card' },
-              { id: 'CASH', label: 'Cash on Table' },
-            ] as const
-          ).map((option) => (
-            <label
-              key={option.id}
-              className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-colors ${
-                paymentOption === option.id
-                  ? 'border-primary bg-primary/5'
-                  : 'border-border/50 hover:bg-muted/40'
-              }`}
-            >
-              <input
-                type="radio"
-                name="paymentOption"
-                value={option.id}
-                checked={paymentOption === option.id}
-                onChange={() => setPaymentOption(option.id)}
-                disabled={isSubmitting}
-                className="accent-primary w-4 h-4"
+                placeholder="e.g. John Doe"
+                value={customerName}
+                onChange={(e) => setCustomerName(e.target.value)}
+                className="rounded-xl border-border bg-background"
               />
-              <span className="text-sm font-medium text-foreground">{option.label}</span>
-            </label>
-          ))}
-        </div>
-      </div>
+            </div>
 
-      {/* Place Order Button */}
-      <Button
-        type="submit"
-        disabled={!isValid || isSubmitting}
-        className="w-full py-6 rounded-full text-base font-bold gap-2 bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-600/20 transition-all active:scale-[0.99] disabled:opacity-50"
-      >
-        {isSubmitting ? (
-          <>
-            <Loader2 className="w-5 h-5 animate-spin" />
-            <span>Creating Order in System...</span>
-          </>
-        ) : (
-          <>
-            <Send className="w-5 h-5" />
-            <span>Confirm & Send via WhatsApp</span>
-          </>
-        )}
-      </Button>
-    </form>
+            {/* Table Number & Phone Number grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="tableNumber" className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                  <MapPin className="w-3.5 h-3.5 text-primary" />
+                  <span>Table Number</span> <span className="text-muted-foreground font-normal text-[11px]">(Optional)</span>
+                </Label>
+                <Input
+                  id="tableNumber"
+                  type="text"
+                  disabled={isSubmitting}
+                  placeholder="e.g. Table 5 / Takeaway"
+                  value={tableNumber}
+                  onChange={(e) => setTableNumber(e.target.value)}
+                  className="rounded-xl border-border bg-background"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="phoneNumber" className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                  <Phone className="w-3.5 h-3.5 text-primary" />
+                  <span>Phone Number</span> <span className="text-muted-foreground font-normal text-[11px]">(Optional)</span>
+                </Label>
+                <Input
+                  id="phoneNumber"
+                  type="tel"
+                  disabled={isSubmitting}
+                  placeholder="e.g. +91 98765 43210"
+                  value={phoneNumber}
+                  onChange={(e) => setPhoneNumber(e.target.value)}
+                  className="rounded-xl border-border bg-background"
+                />
+              </div>
+            </div>
+
+            {/* Email Address */}
+            <div className="space-y-1.5">
+              <Label htmlFor="email" className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                <Mail className="w-3.5 h-3.5 text-primary" />
+                <span>Email Address</span> <span className="text-muted-foreground font-normal text-[11px]">(Optional, for e-receipt)</span>
+              </Label>
+              <Input
+                id="email"
+                type="email"
+                disabled={isSubmitting}
+                placeholder="e.g. john@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="rounded-xl border-border bg-background"
+              />
+            </div>
+
+            {/* Special Instructions */}
+            <div className="space-y-1.5">
+              <Label htmlFor="specialInstructions" className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                <FileText className="w-3.5 h-3.5 text-primary" />
+                <span>Special Instructions / Dietary Notes</span> <span className="text-muted-foreground font-normal text-[11px]">(Optional)</span>
+              </Label>
+              <Textarea
+                id="specialInstructions"
+                rows={3}
+                disabled={isSubmitting}
+                placeholder="Add any customization notes, ice preference, or sugar level here..."
+                value={specialInstructions}
+                onChange={(e) => setSpecialInstructions(e.target.value)}
+                className="rounded-xl border-border bg-background resize-none text-xs"
+              />
+
+              {/* Quick presets */}
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                <span className="text-[11px] text-muted-foreground self-center mr-1">Quick add:</span>
+                {presetNotes.map((note) => (
+                  <button
+                    key={note}
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => addPresetNote(note)}
+                    className="text-[11px] bg-muted hover:bg-primary/10 hover:text-primary text-muted-foreground px-2.5 py-0.5 rounded-full border border-border/50 transition-colors disabled:opacity-50"
+                  >
+                    + {note}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Payment Method Selector */}
+          <div className="rounded-2xl border border-border bg-card p-5 sm:p-6 space-y-3 shadow-sm">
+            <h3 className="font-heading font-bold text-base text-foreground border-b border-border/40 pb-2.5">
+              Choose Payment Method
+            </h3>
+            <div className="space-y-2">
+              {(
+                [
+                  { id: 'UPI', label: 'UPI (Google Pay, PhonePe, Paytm)' },
+                  { id: 'DEBIT_CARD', label: 'Debit Card' },
+                  { id: 'CREDIT_CARD', label: 'Credit Card' },
+                  { id: 'CASH', label: 'Cash on Table' },
+                ] as const
+              ).map((option) => (
+                <label
+                  key={option.id}
+                  className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-colors ${
+                    paymentOption === option.id
+                      ? 'border-primary bg-primary/5'
+                      : 'border-border/50 hover:bg-muted/40'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="paymentOption"
+                    value={option.id}
+                    checked={paymentOption === option.id}
+                    onChange={() => setPaymentOption(option.id)}
+                    disabled={isSubmitting}
+                    className="accent-primary w-4 h-4"
+                  />
+                  <span className="text-sm font-medium text-foreground">{option.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {/* Place Order Button */}
+          <Button
+            type="submit"
+            disabled={!isValid || isSubmitting}
+            className="w-full py-6 rounded-full text-base font-bold gap-2 bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-600/20 transition-all active:scale-[0.99] disabled:opacity-50"
+          >
+            {isSubmitting ? (
+              <>
+                <Loader2 className="w-5 h-5 animate-spin" />
+                <span>Creating Order in System...</span>
+              </>
+            ) : paymentOption === 'UPI' ? (
+              <>
+                <Send className="w-5 h-5" />
+                <span>Pay ₹{cartTotal} with UPI</span>
+              </>
+            ) : (
+              <>
+                <Send className="w-5 h-5" />
+                <span>Confirm & Send via WhatsApp</span>
+              </>
+            )}
+          </Button>
+        </form>
+      )}
+    </>
   );
 }

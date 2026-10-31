@@ -13,6 +13,7 @@ model Cafe {
   slug      String     @unique
   phone     String?
   address   String?
+  orderNotificationChannel OrderNotificationChannel @default(BOTH)
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
   customers Customer[]
@@ -80,6 +81,9 @@ model Order {
   paymentMethod     PaymentMethod      @default(CASH)   
   razorpayOrderId   String?
   razorpayPaymentId String?
+  razorpayQrId      String?   @unique
+  qrExpiresAt       DateTime?
+  qrIssueCount      Int       @default(0)
   tableNumber       String?
   notes             String?
   subtotalInPaise   Int
@@ -153,3 +157,10 @@ enum PaymentMethod {
   CARD
   CASH
 }
+
+enum OrderNotificationChannel {
+  STAFF_PORTAL
+  WHATSAPP
+  BOTH
+}
+
