@@ -257,6 +257,32 @@ export default function AdminOrdersPage() {
     return () => clearInterval(interval);
   }, [autoRefresh, fetchOrders]);
 
+  React.useEffect(() => {
+    if (!('wakeLock' in navigator)) return;
+    let lock: WakeLockSentinel | null = null;
+    let cancelled = false;
+    const acquire = async () => {
+      try {
+        if (document.visibilityState !== 'visible') return;
+        const l = await navigator.wakeLock.request('screen');
+        if (cancelled) { void l.release(); return; }
+        lock = l;
+      } catch {
+        // unsupported or denied: fail silently
+      }
+    };
+    void acquire();
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') void acquire();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', onVisibility);
+      void lock?.release().catch(() => {});
+    };
+  }, []);
+
   // Status update handler
   const handleStatusUpdate = async (orderId: string, newStatus: OrderStatus) => {
     setUpdatingOrderId(orderId);

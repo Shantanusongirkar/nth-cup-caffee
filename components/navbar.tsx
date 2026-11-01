@@ -38,17 +38,7 @@ export function Navbar() {
           </Link>
 
           <div className="flex items-center gap-2">
-            <Link href="/admin/orders">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="rounded-full text-xs gap-1.5 text-muted-foreground hover:text-foreground hidden sm:inline-flex"
-                title="Staff Orders Dashboard"
-              >
-                <LayoutDashboard className="w-3.5 h-3.5 text-primary" />
-                <span>Staff Portal</span>
-              </Button>
-            </Link>
+            
 
             <Link href="/admin/menu">
               <Button

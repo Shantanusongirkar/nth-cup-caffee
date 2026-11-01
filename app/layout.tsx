@@ -26,6 +26,7 @@ export const metadata: Metadata = {
     description: 'Scan QR code, browse menu, place instant table orders via WhatsApp.',
     type: 'website',
   },
+  icons: { apple: '/icons/apple-touch-icon.png' },
 };
 
 export default function RootLayout({
