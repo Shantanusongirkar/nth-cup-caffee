@@ -60,6 +60,23 @@ const EMPTY_FORM: ProductForm = {
 };
 
 export default function AdminMenuPage() {
+  const [isOwner, setIsOwner] = React.useState<boolean | null>(null);
+
+  React.useEffect(() => {
+    async function load() {
+      try {
+        const res = await fetch('/api/auth/me', {
+          credentials: 'include',
+        });
+        const data = await res.json();
+        setIsOwner(!!data?.role && data.role === 'OWNER');
+      } catch {
+        setIsOwner(false);
+      }
+    }
+    load();
+  }, []);
+
   const [products, setProducts] = React.useState<AdminProduct[]>([]);
   const [stats, setStats] = React.useState<AdminProductStats>({
     totalProducts: 0,
@@ -317,6 +334,11 @@ export default function AdminMenuPage() {
         method: 'DELETE',
       });
 
+      if (res.status === 403) {
+        toast.error('Only the owner can delete menu items.');
+        return;
+      }
+
       if (!res.ok) throw new Error('Failed to delete.');
 
       setProducts((prev) =>
@@ -573,14 +595,16 @@ export default function AdminMenuPage() {
                     >
                       <Pencil className="w-3.5 h-3.5" />
                     </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => handleSoftDelete(product)}
-                      className="rounded-xl text-xs font-semibold gap-1 text-destructive hover:bg-destructive/10"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </Button>
+                    {isOwner && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => handleSoftDelete(product)}
+                        className="rounded-xl text-xs font-semibold gap-1 text-destructive hover:bg-destructive/10"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    )}
                   </div>
                 </div>
               </div>

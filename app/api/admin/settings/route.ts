@@ -1,6 +1,6 @@
+import { NextResponse } from "next/server";
 import { getPrisma } from "@/lib/prisma";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireAdminSession } from "@/lib/require-role";
 import type { Session } from "next-auth";
 
 export const runtime = "nodejs";
@@ -18,7 +18,11 @@ function getSession(session: Session | null | undefined) {
 const VALID_CHANNELS = ["STAFF_PORTAL", "WHATSAPP", "BOTH"] as const;
 
 export async function GET() {
-  const session = await getServerSession(authOptions);
+  const auth = await requireAdminSession({ requireRole: "OWNER" });
+  if (auth instanceof NextResponse) {
+    return auth;
+  }
+  const session = auth;
   const { cafeId } = getSession(session);
 
   if (!cafeId) {
@@ -39,19 +43,18 @@ export async function GET() {
 }
 
 export async function PATCH(request: Request) {
-  const session = await getServerSession(authOptions);
-  const { role, cafeId } = getSession(session);
+  const auth = await requireAdminSession({
+    requireRole: "OWNER",
+    forbiddenMessage: "Only the owner can change this setting.",
+  });
+  if (auth instanceof NextResponse) {
+    return auth;
+  }
+  const session = auth;
+  const { cafeId } = getSession(session);
 
   if (!cafeId) {
     return Response.json({ error: "UNAUTHORIZED" }, { status: 401 });
-  }
-
-  // Only the cafe owner can change this setting.
-  if (role !== "OWNER") {
-    return Response.json(
-      { error: "FORBIDDEN", message: "Only the owner can change this setting." },
-      { status: 403 }
-    );
   }
 
   const body = await request.json().catch(() => null);

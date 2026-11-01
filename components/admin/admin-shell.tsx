@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import { signOut } from 'next-auth/react';
 import {
   LayoutDashboard,
@@ -44,7 +44,6 @@ interface AdminShellProps {
 
 export function AdminShell({ children, userName, userEmail, userRole }: AdminShellProps) {
   const pathname = usePathname();
-  const router = useRouter();
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const [signingOut, setSigningOut] = React.useState(false);
 
@@ -57,11 +56,6 @@ export function AdminShell({ children, userName, userEmail, userRole }: AdminShe
     setSigningOut(true);
     await signOut({ callbackUrl: '/staff/login' });
   }
-
-  // Close mobile menu on route change
-  React.useEffect(() => {
-    setMobileOpen(false);
-  }, [pathname]);
 
   const initials = userName
     .split(' ')
@@ -181,6 +175,7 @@ export function AdminShell({ children, userName, userEmail, userRole }: AdminShe
                     <Link
                       key={item.href}
                       href={item.href}
+                      onClick={() => setMobileOpen(false)}
                       className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
                         active
                           ? 'bg-sidebar-primary text-sidebar-primary-foreground'

@@ -1,6 +1,6 @@
 import { put } from "@vercel/blob";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { NextResponse } from "next/server";
+import { requireAdminSession } from "@/lib/require-role";
 import type { Session } from "next-auth";
 
 export const runtime = "nodejs";
@@ -20,9 +20,13 @@ function getSessionCafeId(session: Session | null | undefined): string | null {
 }
 
 export async function POST(request: Request) {
-  // Protected — same session check as the other /api/admin routes (defense in
-  // depth on top of the proxy.ts matcher).
-  const session = await getServerSession(authOptions);
+  // Protected — shared admin auth gate + cafeId scoping (defense in depth on
+  // top of the proxy.ts matcher).
+  const auth = await requireAdminSession();
+  if (auth instanceof NextResponse) {
+    return auth;
+  }
+  const session = auth;
   const cafeId = getSessionCafeId(session);
   if (!cafeId) {
     return Response.json(

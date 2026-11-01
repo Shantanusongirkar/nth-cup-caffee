@@ -1,10 +1,3 @@
-// ============================================================================
-// PASTE INTO:  app/api/orders/[id]/route.ts       (REPLACE the whole file)
-// ----------------------------------------------------------------------------
-// WHAT CHANGED (search for "CHANGED"):
-//   When staff mark a CASH order as COMPLETED, its payment status is now set to
-//   PAID automatically. Before, completed cash orders stayed "Unpaid".
-// ============================================================================
 import { getPrisma } from "@/lib/prisma";
 import { validateUpdateOrderStatusInput } from "@/lib/order-validation";
 import { formatOrderReference } from "../route";

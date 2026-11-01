@@ -13,6 +13,10 @@ export default async function AdminCustomersPage({
   const session = await getServerSession(authOptions);
   if (!session?.user) redirect('/staff/login');
   const user = session.user as { role?: string };
+  if (user.role !== 'OWNER') {
+    // Owner-only page — staff get redirected to the staff orders dashboard.
+    redirect('/admin/orders');
+  }
   const isOwner = user.role === 'OWNER';
   const { search = '', page = '1' } = await searchParams;
 

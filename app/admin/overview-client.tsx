@@ -90,12 +90,19 @@ export function OverviewClient({ period, isOwner }: Props) {
 
   React.useEffect(() => {
     let active = true;
-    setLoading(true);
-    fetch(`/api/admin/overview?period=${period}`, { cache: 'no-store' })
-      .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-      .then((d) => { if (active) { setData(d); setError(null); } })
-      .catch((e) => { if (active) setError(e.message); })
-      .finally(() => { if (active) setLoading(false); });
+    async function load() {
+      setLoading(true);
+      try {
+        const res = await fetch(`/api/admin/overview?period=${period}`, { cache: 'no-store' });
+        const d = await res.json();
+        if (active) { setData(d); setError(null); }
+      } catch (e) {
+        if (active) { setError(e instanceof Error ? e.message : 'Failed to load overview'); }
+      } finally {
+        if (active) { setLoading(false); }
+      }
+    }
+    void load();
     return () => { active = false; };
   }, [period]);
 

@@ -33,11 +33,9 @@ import {
   Volume2,
   VolumeX,
   FileText,
-  Filter,
   ArrowUpDown,
   Utensils,
   X,
-  Flame,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -239,7 +237,14 @@ export default function AdminOrdersPage() {
 
   // Initial load
   React.useEffect(() => {
-    fetchOrders(false);
+    let active = true;
+    async function load() {
+      if (active) {
+        await fetchOrders(false);
+      }
+    }
+    void load();
+    return () => { active = false; };
   }, [fetchOrders]);
 
   // Auto-refresh interval (15 seconds)
@@ -323,7 +328,7 @@ export default function AdminOrdersPage() {
 
   // Filter and sort orders
   const filteredOrders = React.useMemo(() => {
-    let result = orders.filter((order) => {
+    const result = orders.filter((order) => {
       // Status tab filter
       const matchesTab = activeTab === 'ALL' || order.status === activeTab;
 

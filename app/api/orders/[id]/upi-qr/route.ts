@@ -10,6 +10,7 @@ import {
   buildMockUpiUri,
   isDevMockEnabled,
 } from "@/lib/payments/dev-mock";
+import { checkRateLimit, getClientIp, rateLimitResponse } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 
@@ -80,6 +81,12 @@ export async function POST(
   context: { params: Promise<{ id: string }> }
 ) {
   const { id } = await context.params;
+
+  const ip = getClientIp(request);
+  const upiQrRl = checkRateLimit(`upi-qr:create:${ip}:${id}`, 5, 60 * 1000);
+  if (!upiQrRl.allowed) {
+    return rateLimitResponse(upiQrRl.retryAfterSec);
+  }
 
   if (!id || typeof id !== "string") {
     return Response.json(

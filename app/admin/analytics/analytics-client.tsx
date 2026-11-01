@@ -4,7 +4,7 @@ import * as React from 'react';
 import { useRouter } from 'next/navigation';
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
 import { TrendingUp, ShoppingBag, Clock, BarChart2, AlertCircle } from 'lucide-react';
 import { formatInr } from '@/lib/format';
@@ -53,7 +53,11 @@ const tooltipStyle = {
   color: 'var(--card-foreground)',
 };
 
-interface Props { period: Period; isOwner: boolean; }
+interface Props { period: Period; isOwner: boolean; };
+
+function ChartSkeleton({ h = 220 }: { h?: number }) {
+  return <div className={`bg-muted/40 animate-pulse rounded-xl`} style={{ height: h }} />;
+}
 
 export function AnalyticsClient({ period, isOwner }: Props) {
   const router = useRouter();
@@ -68,22 +72,25 @@ export function AnalyticsClient({ period, isOwner }: Props) {
 
   React.useEffect(() => {
     let active = true;
-    setLoading(true);
-    fetch(`/api/admin/analytics?period=${period}`, { cache: 'no-store' })
-      .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-      .then((d) => { if (active) { setData(d); setError(null); } })
-      .catch((e) => { if (active) setError(e.message); })
-      .finally(() => { if (active) setLoading(false); });
+    async function load() {
+      setLoading(true);
+      try {
+        const res = await fetch(`/api/admin/analytics?period=${period}`, { cache: 'no-store' });
+        const d = await res.json();
+        if (active) { setData(d); setError(null); }
+      } catch (e) {
+        if (active) { setError(e instanceof Error ? e.message : 'Failed to load analytics'); }
+      } finally {
+        if (active) { setLoading(false); }
+      }
+    }
+    void load();
     return () => { active = false; };
   }, [period]);
 
   function setPeriod(p: Period) {
     router.push(`/admin/analytics?period=${p}`, { scroll: false });
   }
-
-  const ChartSkeleton = ({ h = 220 }: { h?: number }) => (
-    <div className={`bg-muted/40 animate-pulse rounded-xl`} style={{ height: h }} />
-  );
 
   return (
     <div className="p-6 space-y-7 max-w-7xl mx-auto">

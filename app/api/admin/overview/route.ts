@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth/next';
-import { authOptions } from '@/lib/auth';
+import { requireAdminSession } from '@/lib/require-role';
 import { getPrisma } from '@/lib/prisma';
 
 function periodBounds(period: string): { start: Date; end: Date } {
@@ -27,10 +26,11 @@ function periodBounds(period: string): { start: Date; end: Date } {
 }
 
 export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const auth = await requireAdminSession({ requireRole: 'OWNER' });
+  if (auth instanceof NextResponse) {
+    return auth;
   }
+  const session = auth;
   const user = session.user as { cafeId?: string; role?: string };
   const cafeId = user.cafeId;
   if (!cafeId) return NextResponse.json({ error: 'No cafeId' }, { status: 403 });

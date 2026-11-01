@@ -8,6 +8,7 @@ import type { Session } from "next-auth";
 import { createRazorpayOrder, isRazorpayConfigured } from "@/lib/payments/razorpay";
 // CHANGED: India-time "start of today" helper (see lib/dates.ts)
 import { startOfTodayIST } from "@/lib/dates";
+import { checkRateLimit, getClientIp, rateLimitResponse } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 
@@ -41,6 +42,12 @@ export function formatOrderReference(orderId: string): string {
 }
 
 export async function POST(request: Request) {
+  const ip = getClientIp(request);
+  const orderRl = checkRateLimit(`orders:create:${ip}`, 30, 60 * 1000);
+  if (!orderRl.allowed) {
+    return rateLimitResponse(orderRl.retryAfterSec);
+  }
+
   try {
     let body: unknown;
 

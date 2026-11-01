@@ -1,14 +1,18 @@
 import { getPrisma } from "@/lib/prisma";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireAdminSession } from "@/lib/require-role";
 import { startOfTodayIST } from "@/lib/dates";
+import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
 // Cancels unpaid orders from before today that were never accepted.
 export async function POST() {
-  const session = await getServerSession(authOptions);
-  const cafeId = (session?.user as { cafeId?: string } | undefined)?.cafeId;
+  const auth = await requireAdminSession();
+  if (auth instanceof NextResponse) {
+    return auth;
+  }
+  const session = auth;
+  const cafeId = (session.user as { cafeId?: string } | undefined)?.cafeId;
 
   if (!cafeId) {
     return Response.json(

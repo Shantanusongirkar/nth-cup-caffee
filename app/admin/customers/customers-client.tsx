@@ -1,8 +1,6 @@
 'use client';
 
 import * as React from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { Search, Users, AlertTriangle, ChevronLeft, ChevronRight, Coffee, X } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -53,7 +51,6 @@ interface Props {
 }
 
 export function CustomersClient({ initialSearch, initialPage, isOwner }: Props) {
-  const router = useRouter();
   const [search, setSearch] = React.useState(initialSearch);
   const [debouncedSearch, setDebouncedSearch] = React.useState(initialSearch);
   const [page, setPage] = React.useState(initialPage);
@@ -79,14 +76,17 @@ export function CustomersClient({ initialSearch, initialPage, isOwner }: Props) 
   // Fetch customers
   React.useEffect(() => {
     let active = true;
-    setLoading(true);
-    const params = new URLSearchParams({ page: String(page), limit: String(limit) });
-    if (debouncedSearch) params.set('search', debouncedSearch);
-    fetch(`/api/admin/customers?${params}`, { cache: 'no-store' })
-      .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-      .then((d) => { if (active) { setCustomers(d.customers); setTotal(d.total); setError(null); } })
-      .catch((e) => { if (active) setError(e.message); })
-      .finally(() => { if (active) setLoading(false); });
+    async function load() {
+      setLoading(true);
+      const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+      if (debouncedSearch) params.set('search', debouncedSearch);
+      fetch(`/api/admin/customers?${params}`, { cache: 'no-store' })
+        .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+        .then((d) => { if (active) { setCustomers(d.customers); setTotal(d.total); setError(null); } })
+        .catch((e) => { if (active) setError(e.message); })
+        .finally(() => { if (active) setLoading(false); });
+    }
+    void load();
     return () => { active = false; };
   }, [debouncedSearch, page]);
 
@@ -94,16 +94,17 @@ export function CustomersClient({ initialSearch, initialPage, isOwner }: Props) 
   React.useEffect(() => {
     if (!selectedId) return;
     let active = true;
-    setDetailLoading(true);
-    fetch(`/api/admin/customers/${selectedId}/orders`, { cache: 'no-store' })
-      .then((r) => r.json())
-      .then((d) => {
-        if (active) {
-          setDetailCustomer(d.customer);
-          setDetailOrders(d.orders ?? []);
-        }
-      })
-      .finally(() => { if (active) setDetailLoading(false); });
+    async function load() {
+      setDetailLoading(true);
+      const res = await fetch(`/api/admin/customers/${selectedId}/orders`, { cache: 'no-store' });
+      const d = await res.json();
+      if (active) {
+        setDetailCustomer(d.customer);
+        setDetailOrders(d.orders ?? []);
+      }
+      if (active) setDetailLoading(false);
+    }
+    void load();
     return () => { active = false; };
   }, [selectedId]);
 

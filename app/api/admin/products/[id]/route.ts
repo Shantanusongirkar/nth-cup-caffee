@@ -1,5 +1,5 @@
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { NextResponse } from "next/server";
+import { requireAdminSession } from "@/lib/require-role";
 import { getPrisma } from "@/lib/prisma";
 import { validateUpdateProductInput } from "@/lib/product-validation";
 
@@ -32,7 +32,11 @@ export async function PATCH(
   }
 
   try {
-    const session = await getServerSession(authOptions);
+    const auth = await requireAdminSession();
+    if (auth instanceof NextResponse) {
+      return auth;
+    }
+    const session = auth;
     const cafeId = getSessionCafeId(session);
     if (!cafeId) {
       return Response.json(
@@ -131,7 +135,11 @@ export async function DELETE(
   }
 
   try {
-    const session = await getServerSession(authOptions);
+    const auth = await requireAdminSession({ requireRole: 'OWNER', forbiddenMessage: 'Only the owner can delete menu items.' });
+    if (auth instanceof NextResponse) {
+      return auth;
+    }
+    const session = auth;
     const cafeId = getSessionCafeId(session);
     if (!cafeId) {
       return Response.json(

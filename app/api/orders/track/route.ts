@@ -1,9 +1,16 @@
 import { getPrisma } from "@/lib/prisma";
 import { validateTrackingInput } from "@/lib/order-tracking-validation";
+import { checkRateLimit, getClientIp, rateLimitResponse } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 
 export async function GET(request: Request) {
+  const ip = getClientIp(request);
+  const trackRl = checkRateLimit(`track:${ip}`, 60, 60 * 1000);
+  if (!trackRl.allowed) {
+    return rateLimitResponse(trackRl.retryAfterSec);
+  }
+
   try {
     const { searchParams } = new URL(request.url);
 

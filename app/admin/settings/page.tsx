@@ -1,7 +1,6 @@
 'use client';
 
 import * as React from 'react';
-import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { Loader2, Settings as SettingsIcon } from 'lucide-react';
 

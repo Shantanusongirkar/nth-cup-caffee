@@ -14,6 +14,10 @@ export default async function AdminOverviewPage({
   if (!session?.user) redirect('/staff/login');
 
   const user = session.user as { cafeId?: string; role?: string };
+  if (user.role !== 'OWNER') {
+    // Owner-only page — staff get redirected to the staff orders dashboard.
+    redirect('/admin/orders');
+  }
   const isOwner = user.role === 'OWNER';
   const { period = 'month' } = await searchParams;
 

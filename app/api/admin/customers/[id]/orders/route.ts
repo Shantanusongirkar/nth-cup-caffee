@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth/next';
-import { authOptions } from '@/lib/auth';
+import { requireAdminSession } from '@/lib/require-role';
 import { getPrisma } from '@/lib/prisma';
 
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const auth = await requireAdminSession({ requireRole: 'OWNER' });
+  if (auth instanceof NextResponse) {
+    return auth;
+  }
+  const session = auth;
   const user = session.user as { cafeId?: string };
   const cafeId = user.cafeId;
   if (!cafeId) return NextResponse.json({ error: 'No cafeId' }, { status: 403 });

@@ -1,5 +1,5 @@
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { NextResponse } from "next/server";
+import { requireAdminSession } from "@/lib/require-role";
 import { getPrisma } from "@/lib/prisma";
 import { validateCreateProductInput } from "@/lib/product-validation";
 
@@ -20,7 +20,11 @@ function getSessionCafeId(session: Session | null | undefined): string | null {
 
 export async function GET() {
   try {
-    const session = await getServerSession(authOptions);
+    const auth = await requireAdminSession();
+    if (auth instanceof NextResponse) {
+      return auth;
+    }
+    const session = auth;
     const cafeId = getSessionCafeId(session);
     if (!cafeId) {
       return Response.json(
@@ -89,7 +93,11 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const session = await getServerSession(authOptions);
+    const auth = await requireAdminSession();
+    if (auth instanceof NextResponse) {
+      return auth;
+    }
+    const session = auth;
     const cafeId = getSessionCafeId(session);
     if (!cafeId) {
       return Response.json(
