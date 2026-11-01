@@ -5,59 +5,51 @@ import { checkRateLimit, getClientIp, rateLimitResponse } from "@/lib/rate-limit
 
 const handler = NextAuth(authOptions);
 
+type AuthContext = { params: Promise<{ nextauth: string[] }> };
+
 const LOGIN_RATE_LIMIT = 5;
 const LOGIN_RATE_WINDOW_MS = 15 * 60 * 1000;
 
-async function withLoginRateLimit(req: NextRequest) {
+async function withLoginRateLimit(req: NextRequest, context: AuthContext) {
   const { pathname } = req.nextUrl;
   const isCredentialsCallback =
     req.method === "POST" && pathname.endsWith("/callback/credentials");
 
-  // Only credential sign-ins are rate limited; other auth POSTs pass through.
   if (!isCredentialsCallback) {
-    return handler(req);
+    return handler(req, context);
+  }
+
+  // Read the email from a CLONE so the original body stays readable for NextAuth.
+  let email: string | undefined;
+  try {
+    const raw = await req.clone().text();
+    const contentType = req.headers.get("content-type") ?? "";
+    if (contentType.includes("application/x-www-form-urlencoded")) {
+      const rawEmail = new URLSearchParams(raw).get("email");
+      if (rawEmail) email = rawEmail.trim().toLowerCase();
+    } else {
+      const parsed = JSON.parse(raw) as { email?: unknown };
+      if (typeof parsed?.email === "string") email = parsed.email.trim().toLowerCase();
+    }
+  } catch {
+    // ignore parse errors; fall back to IP-only key
   }
 
   const ip = getClientIp(req);
-  let email: string | undefined;
-  let body: string | undefined;
+  const result = checkRateLimit(
+    `login:${ip}:${email ?? "unknown"}`,
+    LOGIN_RATE_LIMIT,
+    LOGIN_RATE_WINDOW_MS
+  );
+  if (!result.allowed) return rateLimitResponse(result.retryAfterSec);
 
-  try {
-    body = await req.text();
-    const contentType = req.headers.get("content-type") ?? "";
-    if (contentType.includes("application/x-www-form-urlencoded")) {
-      const params = new URLSearchParams(body);
-      const rawEmail = params.get("email");
-      if (rawEmail) {
-        email = rawEmail.trim().toLowerCase();
-      }
-    } else {
-      const parsed = JSON.parse(body) as { email?: unknown };
-      if (typeof parsed?.email === "string") {
-        email = parsed.email.trim().toLowerCase();
-      }
-    }
-  } catch {
-    body = undefined;
-  }
-
-  const result = checkRateLimit(`login:${ip}:${email ?? "unknown"}`, LOGIN_RATE_LIMIT, LOGIN_RATE_WINDOW_MS);
-  if (!result.allowed) {
-    return rateLimitResponse(result.retryAfterSec);
-  }
-
-  const nextReq =
-    body !== undefined
-      ? new NextRequest(req.url, { method: "POST", headers: req.headers, body })
-      : req;
-  return handler(nextReq);
+  return handler(req, context);
 }
 
-export async function GET(req: NextRequest) {
-  // GET is used for CSRF token / session checks — no login attempts, no limit.
-  return handler(req);
+export async function GET(req: NextRequest, context: AuthContext) {
+  return handler(req, context);
 }
 
-export async function POST(req: NextRequest) {
-  return withLoginRateLimit(req);
+export async function POST(req: NextRequest, context: AuthContext) {
+  return withLoginRateLimit(req, context);
 }
