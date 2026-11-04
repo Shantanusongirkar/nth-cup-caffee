@@ -232,15 +232,11 @@ export async function POST(request: Request) {
   }
 }
 
-// CHANGED: the whole GET function below is new. POST above is untouched.
-// - accepts ?range=today|yesterday|week|all  (default: today)
-// - "today" = today's orders + older orders that are still active in the kitchen
-//   (so a paid order placed at 11:55 PM does not vanish at midnight)
-// - "today" is measured in India time, not server (UTC) time
-// - returns staleCount = old, unpaid, never-accepted orders (for the Clear button)
+// CHANGED: "today" is now strict (only orders placed today).
+// New range "open" = older orders that are still active in the kitchen.
+// New field openOlderCount tells the page how many such orders exist.
 export async function GET(request: Request) {
   try {
-    // Authenticated — only the logged-in staff member's own cafe orders
     const session = await getServerSession(authOptions);
     const cafeId = getSessionCafeId(session);
     if (!cafeId) {
@@ -252,22 +248,20 @@ export async function GET(request: Request) {
 
     const { searchParams } = new URL(request.url);
     const statusParam = searchParams.get("status")?.toUpperCase();
-    const range = (searchParams.get("range") ?? "today").toLowerCase(); // CHANGED
+    const range = (searchParams.get("range") ?? "today").toLowerCase();
     const limit = Math.min(Math.max(parseInt(searchParams.get("limit") || "50", 10), 1), 100);
     const page = Math.max(parseInt(searchParams.get("page") || "1", 10), 1);
     const skip = (page - 1) * limit;
 
     const prisma = getPrisma();
-    const todayStart = startOfTodayIST(); // CHANGED: was new Date().setHours(0,0,0,0)
+    const todayStart = startOfTodayIST();
     const DAY_MS = 24 * 60 * 60 * 1000;
 
-    // CHANGED: where-clause type now also allows createdAt and OR
     const whereClause: {
       cafeId: string;
       status?: OrderStatus;
       createdAt?: { gte?: Date; lt?: Date };
       OR?: Array<{
-        createdAt?: { gte: Date };
         status?: OrderStatus;
         paymentStatus?: "PAID";
       }>;
@@ -280,12 +274,14 @@ export async function GET(request: Request) {
       whereClause.status = statusParam as OrderStatus;
     }
 
-    // CHANGED: date range filter
     if (range === "today") {
+      whereClause.createdAt = { gte: todayStart };
+    } else if (range === "open") {
+      // Older orders that are still active: brewing, or paid but not accepted
+      whereClause.createdAt = { lt: todayStart };
       whereClause.OR = [
-        { createdAt: { gte: todayStart } }, // placed today
-        { status: "CONFIRMED" }, // still being brewed, from any day
-        { status: "PENDING", paymentStatus: "PAID" }, // paid but not accepted yet
+        { status: "CONFIRMED" },
+        { status: "PENDING", paymentStatus: "PAID" },
       ];
     } else if (range === "yesterday") {
       whereClause.createdAt = {
@@ -297,44 +293,54 @@ export async function GET(request: Request) {
     }
     // range === "all": no date filter
 
-    // CHANGED: the four database queries now run together (faster)
-    const [orders, totalCount, todayOrders, staleCount] = await Promise.all([
-      prisma.order.findMany({
-        where: whereClause,
-        orderBy: { createdAt: "desc" },
-        take: limit,
-        skip,
-        include: {
-          customer: {
-            select: { id: true, name: true, phone: true, email: true },
-          },
-          items: {
-            select: {
-              id: true,
-              productId: true,
-              productName: true,
-              unitPriceInPaise: true,
-              quantity: true,
+    const [orders, totalCount, todayOrders, staleCount, openOlderCount] =
+      await Promise.all([
+        prisma.order.findMany({
+          where: whereClause,
+          orderBy: { createdAt: "desc" },
+          take: limit,
+          skip,
+          include: {
+            customer: {
+              select: { id: true, name: true, phone: true, email: true },
+            },
+            items: {
+              select: {
+                id: true,
+                productId: true,
+                productName: true,
+                unitPriceInPaise: true,
+                quantity: true,
+              },
             },
           },
-        },
-      }),
-      prisma.order.count({ where: whereClause }),
-      // Today's stats (cards at the top of the page)
-      prisma.order.findMany({
-        where: { cafeId, createdAt: { gte: todayStart } },
-        select: { status: true, totalInPaise: true },
-      }),
-      // CHANGED: old, unpaid, never-accepted orders that can be cleared
-      prisma.order.count({
-        where: {
-          cafeId,
-          status: "PENDING",
-          paymentStatus: "UNPAID",
-          createdAt: { lt: todayStart },
-        },
-      }),
-    ]);
+        }),
+        prisma.order.count({ where: whereClause }),
+        prisma.order.findMany({
+          where: { cafeId, createdAt: { gte: todayStart } },
+          select: { status: true, totalInPaise: true },
+        }),
+        // Old, unpaid, never-accepted orders (for the "Clear" button)
+        prisma.order.count({
+          where: {
+            cafeId,
+            status: "PENDING",
+            paymentStatus: "UNPAID",
+            createdAt: { lt: todayStart },
+          },
+        }),
+        // CHANGED: older orders still open in the kitchen (for the notice button)
+        prisma.order.count({
+          where: {
+            cafeId,
+            createdAt: { lt: todayStart },
+            OR: [
+              { status: "CONFIRMED" },
+              { status: "PENDING", paymentStatus: "PAID" },
+            ],
+          },
+        }),
+      ]);
 
     const stats = {
       todayOrders: todayOrders.length,
@@ -354,7 +360,8 @@ export async function GET(request: Request) {
       {
         orders: formattedOrders,
         stats,
-        staleCount, // CHANGED: new field
+        staleCount,
+        openOlderCount, // CHANGED: new field
         totalCount,
         page,
         limit,
