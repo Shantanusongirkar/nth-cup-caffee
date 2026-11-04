@@ -2,9 +2,8 @@
 
 // ============================================================================
 // PASTE INTO:  app/admin/orders/page.tsx       (REPLACE the whole file)
-// WHAT CHANGED: 7 small edits, each marked "CHANGED (n/7)". Everything else
-// is exactly your existing file. Search for "CHANGED" to see them all.
-// You can delete this banner comment after pasting.
+// Contains: date filter, "Clear old unpaid", "older orders still open" button,
+// and Shantanu's kitchen wake lock. Search "CHANGED" to see the date filter edits.
 // ============================================================================
 
 import * as React from 'react';
@@ -150,7 +149,7 @@ function playNotificationChime() {
 }
 
 // CHANGED (1/7): the date filter choices
-type DateRange = 'TODAY' | 'YESTERDAY' | 'WEEK' | 'ALL';
+type DateRange = 'TODAY' | 'YESTERDAY' | 'WEEK' | 'ALL' | 'OPEN';
 
 export default function AdminOrdersPage() {
   const [orders, setOrders] = React.useState<ServerOrder[]>([]);
@@ -174,6 +173,7 @@ export default function AdminOrdersPage() {
   // CHANGED (2/7): date filter + cleanup button state
   const [range, setRange] = React.useState<DateRange>('TODAY');
   const [staleCount, setStaleCount] = React.useState(0);
+  const [openOlderCount, setOpenOlderCount] = React.useState(0);
   const [isClearing, setIsClearing] = React.useState(false);
 
   // Track known order IDs for sound notification on new pending order arrival
@@ -217,6 +217,7 @@ export default function AdminOrdersPage() {
 
       setOrders(incomingOrders);
       setStaleCount(data.staleCount ?? 0); // CHANGED (4/7)
+      setOpenOlderCount(data.openOlderCount ?? 0);
       if (data.stats) {
         setStats(data.stats);
       }
@@ -644,6 +645,35 @@ export default function AdminOrdersPage() {
               <span>{isClearing ? 'Clearing...' : `Clear ${staleCount} old unpaid`}</span>
             </Button>
           )}
+
+          {/* Older orders that are still open (brewing, or paid but not accepted) */}
+          {range === 'TODAY' && openOlderCount > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleRangeChange('OPEN')}
+              className="h-9 rounded-xl text-xs font-semibold gap-1.5 border-primary/40 text-primary hover:bg-primary/10"
+            >
+              <Clock className="w-3.5 h-3.5" />
+              <span>{openOlderCount} older order(s) still open</span>
+            </Button>
+          )}
+
+          {range === 'OPEN' && (
+            <>
+              <span className="text-xs text-muted-foreground">
+                Showing older orders that are still open.
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => handleRangeChange('TODAY')}
+                className="h-9 rounded-xl text-xs font-semibold"
+              >
+                Back to Today
+              </Button>
+            </>
+          )}
         </div>
 
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
@@ -843,7 +873,7 @@ export default function AdminOrdersPage() {
                 key={order.id}
                 className={`rounded-2xl border bg-card p-5 flex flex-col justify-between space-y-4 transition-all duration-200 hover:shadow-xl ${
                   statusStyle.cardAccent
-                } ${order.status === 'PENDING' ? 'bg-amber-500/[0.02]' : ''}`}
+                } ${order.status === 'PENDING' ? 'bg-amber-500/2' : ''}`}
               >
                 {/* ── Top Header of Card ── */}
                 <div className="space-y-3.5">
