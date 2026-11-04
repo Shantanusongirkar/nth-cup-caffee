@@ -50,8 +50,8 @@ A full-stack web application where cafe customers browse a menu, build a cart, a
 1. Clone the repository:
 
 ```bash
-[git clone https://github.com/<your-org>/nth-cup-caffee.git
-](https://github.com/Shantanusongirkar/nth-cup-caffee.git)cd nth-cup-caffee
+git clone https://github.com/<your-org>/nth-cup-caffee.git
+
 ```
 
 2. Install dependencies:
